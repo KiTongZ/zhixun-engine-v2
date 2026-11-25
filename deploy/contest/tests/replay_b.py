@@ -12,18 +12,22 @@ import swanlab
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import contest_submission as entry
 
-def replay(package, work):
+def replay(package, work, dataset="B"):
+    if dataset not in ("B", "C"):
+        raise ValueError("expected B or C")
     entry.WORK = work
     checkpoint = package / "checkpoint.npz"
-    parent_id = "official-B"
+    parent_id = "official-" + dataset
     run = swanlab.init(workspace="KiTongZ", project="zhixun-engine-v2", mode="online",
-                       on_online_error="raise", experiment_name="B-balanced-round-replay",
+                       on_online_error="raise", experiment_name=("B-balanced-round-replay" if dataset == "B" else "C-head-round-replay"),
                        config={"split":"official public validation","decision_source":"recorded budgets"})
     for index in range(1, 11):
         budget = {"epochs": 3 if index == 1 else 2, "learning_rate": .006 if index == 1 else .003}
+        if dataset == "C":
+            budget = {"epochs": 1 if index == 1 else 2, "learning_rate": .001 if index == 1 else .002 if index <= 5 else .004}
         current = f"round-{index}"
         record = {}
-        rnd = SimpleNamespace(dataset_key="B", round_index=index, call_ids=["local"],
+        rnd = SimpleNamespace(dataset_key=dataset, round_index=index, call_ids=["local"],
             task={"task":"regression","public_projection":{f"{s}_path":package/"public"/(s+".jsonl") for s in ("train","validation")}},
             parent=SimpleNamespace(artifact_id=parent_id, descriptor={"checkpoint_paths":["checkpoint.npz"]},
                                    path=lambda name,root: checkpoint),
@@ -41,10 +45,16 @@ def replay(package, work):
             parent_id = current
         else:
             assert index == 10 and record["selected_artifact_id"] == parent_id
+    if dataset == "C":
+        final = entry.Model.load(checkpoint)
+        val = entry.read_dataset(package/"public/validation.jsonl", "regression", [], final.meta["paths"])
+        assert abs(entry._metrics(final, val)["rmse"] - state["selected_metrics"]["rmse"]) < 1e-8
+        run.log({"final_head_refined": int(state["head_refined"])})
     run.finish()
     assert parent_id == "round-10"
 
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as work:
-        replay(Path(sys.argv[1]).resolve(),Path(work))
+        replay(Path(sys.argv[1]).resolve(),Path(work), sys.argv[2] if len(sys.argv) > 2 else "B")
+
 

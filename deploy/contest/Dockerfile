@@ -24,6 +24,7 @@ COPY deploy/contest/baselines /app/baselines
 
 # fixed entry + submission
 COPY deploy/contest/harness.py /app/harness.py
+COPY deploy/contest/engine_head.py /app/engine_head.py
 COPY deploy/contest/bearing_sampling.py /app/bearing_sampling.py
 COPY deploy/contest/contest_submission.py /app/contest_submission.py
 
@@ -31,4 +32,5 @@ RUN python -c "import contest_harness, numpy; from baselines.model import Model;
 
 ENTRYPOINT ["python3", "/app/harness.py"]
 CMD ["describe"]
+
 

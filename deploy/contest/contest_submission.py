@@ -26,6 +26,7 @@ from pathlib import Path
 
 import numpy as np
 
+from engine_head import refine_head
 from bearing_sampling import balanced_rows
 from baselines.data import flatten, read_dataset
 from baselines.model import Model
@@ -235,6 +236,15 @@ def train(rnd) -> None:
             best_score = score
             best_model = copy.deepcopy(model)
     model = best_model
+    head_refined = False
+    if late_engine and rnd.round_index == 10:
+        refined = copy.deepcopy(model)
+        refine_head(refined, train["x"], train["y"], penalty=.001)
+        refined_score = _primary(_metrics(refined, validation), metric)
+        if _is_better(direction, refined_score, best_score):
+            model = refined
+            best_score = refined_score
+            head_refined = True
 
     # ---- candidate artifact (checkpoint.npz written by the baseline's own saver)
     work = WORK
@@ -252,13 +262,16 @@ def train(rnd) -> None:
     change = str(decision.get("change_summary") or f"continue baseline for {epochs} epoch(s), lr={lr}")[:900]
     reason = str(decision.get("reason") or f"validation {metric}={best_score:.5f} after {epochs} epoch(s)")[:900]
 
+    if head_refined:
+        change = f"{change[:780]} | Refitted final linear head on public training rows (ridge=0.001)."
+        reason = f"Final head improved public validation {metric} to {best_score:.6f}."
     submitted = rnd.submit_candidate(
         candidate_dir,
         hypothesis=hypothesis,
         change_summary=change,
         configuration={"round": rnd.round_index, "dataset_key": dataset_key, "task": task,
                        "epochs": epochs, "learning_rate": lr, "metric": metric,
-                       "validation_before": before, "validation_after": _metrics(model, validation),
+                       "head_refined": head_refined, "validation_before": before, "validation_after": _metrics(model, validation),
                        "model_call_id": receipt.call_id, "parent": parent_info,
                        "history": history},
         seed=int(model.meta["seed"]),
@@ -281,7 +294,7 @@ def train(rnd) -> None:
         "round": rnd.round_index, "dataset_key": dataset_key, "task": task,
         "selected": selected_kind, "artifact_id": selected_id, "candidate_id": submitted["artifact_id"],
         "model_call_id": receipt.call_id, "epochs": epochs, "learning_rate": lr,
-        "validation_before": before, "validation_after": _metrics(model, validation),
+        "head_refined": head_refined, "validation_before": before, "validation_after": _metrics(model, validation),
         "history": history,
         "selected_epoch": selected_epoch, "selected_metrics": selected_metrics,
         "parent": parent_info,
@@ -345,6 +358,7 @@ def predict(sample, model_dir):
         scores[1] = max(0.0, scores[0] - 1e-6)
     return [{"label": str(classes[int(i)]), "score": max(0.0, min(1.0, scores[rank]))}
             for rank, i in enumerate(order)]
+
 
 
 

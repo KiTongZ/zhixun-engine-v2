@@ -84,3 +84,9 @@ python deploy/contest/tests/local_round.py --dataset C --epochs 3
 
 
 
+
+## 发动机末轮输出层候选
+
+C 的第十轮在轮内最佳检查点上冻结隐藏层，用公开训练行拟合线性输出的残差，岭惩罚系数为 0.001。公开主指标严格改善时才提交修正后的检查点。完整公开验证 RMSE 从 51.602 降到 51.407 循环，MAE 从 37.209 升至 37.302；27 台整机留出对照 RMSE 从 54.289 降至 53.773。公开集的高估误差 P95 略升，隐藏成绩待测。
+
+[训练与评估记录](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/ukyppnnd) · 候选镜像 `zhixun-contest-c-head-ridge.tar`

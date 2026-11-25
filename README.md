@@ -56,3 +56,31 @@ python deploy/contest/tests/local_round.py --dataset C --epochs 3
 ```
 
 每次成功运行会输出 `LOCAL ROUND OK` 和本次实验目录。在该目录中，`finish.json` 保存本地宿主回执，`workspace/state-r1/round.json` 保存逐轮指标和选中轮次，`workspace/candidate-r1/checkpoint.npz` 是通过独立预测入口验证的候选模型。复现脚本见 [local_round.py](deploy/contest/tests/local_round.py)。
+
+## 轴承等权采样与后续实验
+
+
+长寿命轴承贡献更多快照。为避免其在每轮训练中占据过大比重，B 的每个 epoch 按轴承等权、有放回地抽取与原训练集等量的快照，编号仅用于分组。A、C 沿用第二版策略。B 提交第十轮的轮内最优候选。
+
+本地从公开训练集轮流留出一整根轴承，剩余设备独立拟合标准化和模型；同折内从同一预训练状态比较原采样、部分均衡和完全均衡。九折的逐轴承平均 RMSE 分别为 749.79、730.08、698.18 分钟，完全均衡在七折改善。使用官方父模型在公开验证集做 20 个 epoch 的固定预算对照，原采样和完全均衡分别为 689.16、648.09 分钟。随后按第二版预算经实际训练入口本地回放十轮，最终公开验证 RMSE 为 643.18 分钟，MAE 为 538.08 分钟。等权版已完成平台试运行，B 隐藏 RMSE 为 217.03 分钟，MAE 为 141.51 分钟。
+
+[九折采样对照](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/jwwhspl9) · [十轮回放](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/h2d2cfb6)
+
+## 发动机后五轮学习率候选
+
+本次候选保留轴承等权采样，在发动机任务第 6 至 10 轮使用 0.004 学习率。公开验证回放第十轮 RMSE 为 51.602 循环，默认分支为 52.232；MAE 分别为 37.209 和 37.839。四个工况子集的末轮 RMSE 都有改善。0.004 分支在第七轮出现较大的非对称惩罚，隐藏集效果待测。单线程和四线程配置共用同一数据与种子。
+
+[单线程实验](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/2zzmhqx3) · [四线程配置复核](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/r6gyrg6u)
+
+## 提交信息
+
+- **模型类型**　基础模型，`Qwen/Qwen3.8-27B`
+- **Harness 镜像**　`zhixun-contest-c-late-rate.tar`，Linux/amd64
+- **实验归档**　[SwanLab · zhixun-engine-v2](https://swanlab.cn/@KiTongZ/zhixun-engine-v2)
+- **项目源码**　[GitHub · KiTongZ/zhixun-engine-v2](https://github.com/KiTongZ/zhixun-engine-v2)
+
+
+
+
+
+

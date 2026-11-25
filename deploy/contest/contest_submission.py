@@ -169,68 +169,44 @@ def train(rnd) -> None:
 
     before = _metrics(model, validation)
 
-    # ---- one real platform model call decides the continuation budget
-    state_payload = {
-        "dataset_key": dataset_key,
-        "round_index": rnd.round_index,
-        "task": task,
-        "metric": metric,
-        "metric_direction": direction,
-        "train_rows": len(train["ids"]),
-        "validation_rows": len(validation["ids"]),
-        "features": len(train["paths"]),
-        "parent_epochs": int(model.meta.get("epochs", 0)),
-        "parent_steps": int(model.meta.get("steps", 0)),
-        "parent_validation": {k: round(v, 5) for k, v in before.items()},
-        "choices": {"epochs": [1, 2, 3], "learning_rate": [config["learning_rate"],
-                                                            config["learning_rate"] * 2]},
-    }
+    # ---- one real platform model call; tiny JSON keeps decode cost low
+    default_lr = float(config["learning_rate"])
+    low_cost_bearing = dataset_key == "B" and task == "regression" and rnd.round_index >= 2
+    late_engine = dataset_key == "C" and task == "regression" and 6 <= rnd.round_index <= 10
     tested_budget = None
     if rnd.round_index == 1 and parent_path is not None:
         tested_budget = {"B": (3, 2.0), "C": (1, 0.5)}.get(dataset_key)
     if tested_budget:
-        tested_epochs, factor = tested_budget
-        tested_lr = float(config["learning_rate"]) * factor
-        state_payload["public_validation_recommendation"] = {
-            "epochs": tested_epochs, "learning_rate": tested_lr,
-            "reason": "Lowest validation RMSE in an official-parent 3-rate comparison. Prefer this budget when applicable.",
-        }
-        state_payload["choices"]["learning_rate"] = sorted(set(
-            state_payload["choices"]["learning_rate"] + [tested_lr]))
-    low_cost_bearing = dataset_key == "B" and task == "regression" and rnd.round_index >= 2
-    if low_cost_bearing:
-        state_payload["choices"] = {"epochs": [1], "learning_rate": [config["learning_rate"] * .5]}
-        state_payload["sampling_fraction"] = 1 / 32
-    late_engine = dataset_key == "C" and task == "regression" and 6 <= rnd.round_index <= 10
-    if late_engine:
-        state_payload["choices"]["learning_rate"] = [2 * config["learning_rate"]]
-        state_payload["public_validation_recommendation"] = {
-            "epochs": 2, "learning_rate": 2 * config["learning_rate"],
-            "reason": "Late-round public replay: lowest round-ten RMSE across three tested rates."
-        }
-    prompt = ("You are the decision layer of a continuation-training system. "
-              "Choose the training budget for this round. Reply with one JSON object only: "
-              '{"epochs": 1-3, "learning_rate": number, "hypothesis": "<=200 chars", '
-              '"change_summary": "<=200 chars", "reason": "<=200 chars"}. '
-              "State: " + json.dumps(state_payload, ensure_ascii=False, separators=(",", ":")))
-    limit = max(16, min(320, int(getattr(rnd, "max_output_tokens", 256) or 256)))
-    receipt = rnd.model([{"role": "user", "content": prompt}],
-                        max_tokens=limit, temperature=0)
+        rec_epochs, factor = tested_budget
+        rec_lr = default_lr * factor
+    elif low_cost_bearing:
+        rec_epochs, rec_lr = 1, .5 * default_lr
+    elif late_engine:
+        rec_epochs, rec_lr = 2, 2 * default_lr
+    else:
+        rec_epochs, rec_lr = 2, default_lr
+    state_payload = {"d": dataset_key, "r": rnd.round_index, "t": task,
+                     "n": len(train["ids"]), "pe": int(model.meta.get("epochs", 0)),
+                     "pv": round(_primary(before, metric), 4), "e0": rec_epochs, "l0": rec_lr}
+    prompt = ('Reply one JSON {"e":int 1-3,"l":float} only. State: '
+              + json.dumps(state_payload, separators=(",", ":")))
+    limit = max(16, min(24, int(getattr(rnd, "max_output_tokens", 256) or 256)))
+    receipt = rnd.model([{"role": "user", "content": prompt}], max_tokens=limit,
+                        temperature=0, enable_thinking=False)
     decision = _extract_json(receipt.text) or {}
     log(f"model call id={receipt.call_id} decision={decision}")
 
     try:
-        epochs = int(decision.get("epochs", tested_epochs if tested_budget else 2))
+        epochs = int(decision.get("e", decision.get("epochs", rec_epochs)))
     except (TypeError, ValueError):
-        epochs = 2
+        epochs = rec_epochs
     epochs = max(1, min(3, epochs))
-    default_lr = float(config["learning_rate"])
     try:
-        lr = float(decision.get("learning_rate", tested_lr if tested_budget else default_lr))
+        lr = float(decision.get("l", decision.get("learning_rate", rec_lr)))
     except (TypeError, ValueError):
-        lr = default_lr
+        lr = rec_lr
     if not math.isfinite(lr) or lr <= 0:
-        lr = default_lr
+        lr = rec_lr
     lr = min(max(lr, default_lr * 0.5), default_lr * 2.0)
     if late_engine:
         lr = 2 * default_lr

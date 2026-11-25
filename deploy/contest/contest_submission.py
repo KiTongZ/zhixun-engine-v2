@@ -246,9 +246,8 @@ def train(rnd) -> None:
     for _ in range(epochs):
         rows = slice(None)
         if dataset_key == "B" and task == "regression":
-            rows = balanced_rows(train["ids"], model.meta["epochs"], model.meta["seed"], 1)
-            if low_cost_bearing:
-                rows = rows[:max(1, round(len(rows) / 32))]
+            rows = balanced_rows(train["ids"], model.meta["epochs"], model.meta["seed"], 1,
+                                 divisor=32 if low_cost_bearing else 1)
         loss = float(model.fit(train["x"][rows], train["y"][rows], 1)[0])
         current = _metrics(model, validation)
         score = _primary(current, metric)
@@ -256,16 +255,19 @@ def train(rnd) -> None:
         log(f"epoch {model.meta['epochs']} loss={loss:.5f} {metric}={score:.5f}")
         if _is_better(direction, score, best_score):
             best_score = score
+            selected_metrics = current
             best_model = copy.deepcopy(model)
     model = best_model
     head_refined = False
     if late_engine and rnd.round_index == 10:
         refined = copy.deepcopy(model)
         refine_head(refined, train["x"], train["y"], penalty=.001)
-        refined_score = _primary(_metrics(refined, validation), metric)
+        refined_metrics = _metrics(refined, validation)
+        refined_score = _primary(refined_metrics, metric)
         if _is_better(direction, refined_score, best_score):
             model = refined
             best_score = refined_score
+            selected_metrics = refined_metrics
             head_refined = True
 
     # ---- candidate artifact (checkpoint.npz written by the baseline's own saver)
@@ -284,7 +286,7 @@ def train(rnd) -> None:
     reason = str(decision.get("reason") or f"validation {metric}={best_score:.5f} after {epochs} epoch(s)")[:900]
 
     if low_cost_bearing:
-        change = f"One balanced 1/32-size training pass at lr={lr}; {len(rows)} draws."
+        change = f"One 1/32-size training pass at lr={lr}; {len(rows)} draws (uniform if device groups unavailable)."
     if head_refined:
         change = f"{change[:780]} | Refitted final linear head on public training rows (ridge=0.001)."
         reason = f"Final head improved public validation {metric} to {best_score:.6f}."
@@ -294,7 +296,7 @@ def train(rnd) -> None:
         change_summary=change,
         configuration={"round": rnd.round_index, "dataset_key": dataset_key, "task": task,
                        "epochs": epochs, "learning_rate": lr, "metric": metric,
-                       "head_refined": head_refined, "validation_before": before, "validation_after": _metrics(model, validation),
+                       "head_refined": head_refined, "validation_before": before, "validation_after": selected_metrics,
                        "model_call_id": receipt.call_id, "parent": parent_info,
                        "history": history},
         seed=int(model.meta["seed"]),
@@ -303,11 +305,9 @@ def train(rnd) -> None:
         predict_argv=PREDICT_ARGV,
     )
 
-    candidate_metrics = _metrics(model, validation)
     selected_id = submitted["artifact_id"]
     selected_kind = "candidate"
     selected_epoch = int(model.meta["epochs"])
-    selected_metrics = candidate_metrics
     state_dir = work / f"state-r{rnd.round_index}"
     if state_dir.exists():
         import shutil
@@ -317,7 +317,7 @@ def train(rnd) -> None:
         "round": rnd.round_index, "dataset_key": dataset_key, "task": task,
         "selected": selected_kind, "artifact_id": selected_id, "candidate_id": submitted["artifact_id"],
         "model_call_id": receipt.call_id, "epochs": epochs, "learning_rate": lr,
-        "head_refined": head_refined, "validation_before": before, "validation_after": _metrics(model, validation),
+        "head_refined": head_refined, "validation_before": before, "validation_after": selected_metrics,
         "history": history,
         "selected_epoch": selected_epoch, "selected_metrics": selected_metrics,
         "parent": parent_info,
@@ -330,7 +330,7 @@ def train(rnd) -> None:
         change_summary=change,
         reason=reason,
         configuration={"round": rnd.round_index, "selected": selected_kind, "selected_metrics": selected_metrics, "epochs": epochs, "learning_rate": lr,
-                       "validation_after": _metrics(model, validation),
+                       "validation_after": selected_metrics,
                        "model_call_id": receipt.call_id},
         seed=int(model.meta["seed"]),
         history_ids=history_ids,

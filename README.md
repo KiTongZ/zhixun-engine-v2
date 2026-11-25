@@ -139,3 +139,9 @@ C 第 10 轮记录确认平台执行了输出层修正（岭惩罚 0.001）。�
 以上只计数据读取与校验。平台总用时、资源效率得分和各任务隐藏集表现仍待正式评测。镜像归档经重新加载并通过 describe 检查。使用新版代码重新打包三个任务的模型产物，三种启动参数共九次隔离预测测试均通过。[效率与预测一致性实验](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/1ifa06g4)
 
 气体识别另跑了四组共 52 个十轮筛选配置（含各组对照）。从同一父检查点比较分类输出层融合、特征幅度扰动与类别平衡、传感器或特征随机遮挡、类别偏置修正。完整公开验证回放未显示可复现的优势，候选沿用原有分类模型。[输出层](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/edvm3r5c) · [幅度与类别平衡](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/4z4solhs) · [随机遮挡](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/xyjl6gqg) · [偏置修正](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/lk9c3z8o)
+
+## 基于 feature-cache 的资源优化候选
+
+归档为 `zhixun-contest-feature-cache-efficient.tar`，基线源码为 34134d5。A、B、C 每轮保留被选中检查点的公开验证指标，候选声明、状态文件和最终回执共用同一次计算结果。相较该基线，每轮省去四次重复的全验证集前向计算。学习率策略、模型决策 Token 上限和 C 末轮输出层惩罚均沿用 feature-cache。B 小预算轮遇到匿名设备编号时使用固定种子的均匀抽样，可识别设备时继续等权抽样。
+
+本地验证使用公开数据和模拟模型网关。平台 v9 报告为入口预检的只读检查操作次数耗尽，平台正式预检和评分仍需由平台验证。

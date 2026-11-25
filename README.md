@@ -113,3 +113,13 @@ python deploy/contest/tests/isolated_predict.py PACKAGES A_CANDIDATE B_CANDIDATE
 | C · 发动机寿命 | RMSE 51.469978 循环，MAE 37.333099 循环 | 1,911.49 秒 |
 
 C 第 10 轮记录确认平台执行了输出层修正（岭惩罚 0.001）。本节的模型指标来自逐轮公开验证栏；截图未披露分任务隐藏集指标、各阶段对总分的贡献或资源效率计分明细。
+
+## 本地候选：轴承后九轮小预算续训
+
+已正式评测的镜像为 zhixun-contest-artifact-batch-v1（12.0001 / 35）。新候选 zhixun-contest-b-small-budget 沿用其预测协议与 A/C 策略。B 在第 2–10 轮以 0.0015 学习率做一次设备等权抽样更新，每次抽取原训练集行数的 1/32。本地实际入口回放首轮使用 3 个 epoch、学习率 0.006。
+
+四批筛选共运行 90 条十轮路径（含对照复跑），另用真实训练入口回放两次。最终九折分别留出一根训练轴承，在其余设备上初始化并预训练，公开验证集用于轮内选模。相对各折初始模型，十轮平均 RMSE 改善由 3.80% 增至 7.36%；逐折最差轮改善的均值由 −3.81% 升至 +3.08%。最长连续未追平历史最佳的轮数平均由 7.78 降至 6.78；相邻轮误差变化绝对值占初始 RMSE 的平均比例由 5.21% 降至 2.30%。这些指标用于本地比较，官方阶段与评分权重未在本地重现。
+
+完整公开集三种抽样种子的十轮末 RMSE 均值从 647.11 降至 642.07 分钟，其中一个种子退步。三种子十轮平均改善为 5.31% → 4.94%，最差轮改善均值为 2.86% → 2.54%。标准种子真实训练入口回放末轮 RMSE 为 624.40 分钟。十轮处理的训练行次从 147,672 降到 23,076；线上 Token 与资源效率分待评测。此候选尚未送正式评测。
+
+[初筛](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/o1dwy931) · [半量复核](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/7mkog8b9) · [三种子对照](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/h2xla2wu) · [小预算九折复核](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/bd9idmxv) · [最终入口回放](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/9gipavjh)

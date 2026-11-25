@@ -197,6 +197,10 @@ def train(rnd) -> None:
         }
         state_payload["choices"]["learning_rate"] = sorted(set(
             state_payload["choices"]["learning_rate"] + [tested_lr]))
+    low_cost_bearing = dataset_key == "B" and task == "regression" and rnd.round_index >= 2
+    if low_cost_bearing:
+        state_payload["choices"] = {"epochs": [1], "learning_rate": [config["learning_rate"] * .5]}
+        state_payload["sampling_fraction"] = 1 / 32
     late_engine = dataset_key == "C" and task == "regression" and 6 <= rnd.round_index <= 10
     if late_engine:
         state_payload["choices"]["learning_rate"] = [2 * config["learning_rate"]]
@@ -230,6 +234,8 @@ def train(rnd) -> None:
     lr = min(max(lr, default_lr * 0.5), default_lr * 2.0)
     if late_engine:
         lr = 2 * default_lr
+    if low_cost_bearing:
+        epochs, lr = 1, .5 * default_lr
     model.meta["learning_rate"] = lr
     model.validate()
 
@@ -241,10 +247,12 @@ def train(rnd) -> None:
         rows = slice(None)
         if dataset_key == "B" and task == "regression":
             rows = balanced_rows(train["ids"], model.meta["epochs"], model.meta["seed"], 1)
+            if low_cost_bearing:
+                rows = rows[:max(1, round(len(rows) / 32))]
         loss = float(model.fit(train["x"][rows], train["y"][rows], 1)[0])
         current = _metrics(model, validation)
         score = _primary(current, metric)
-        history.append({"epoch": int(model.meta["epochs"]), "loss": loss, "metrics": current})
+        history.append({"training_rows": len(train["x"]) if isinstance(rows, slice) else len(rows), "epoch": int(model.meta["epochs"]), "loss": loss, "metrics": current})
         log(f"epoch {model.meta['epochs']} loss={loss:.5f} {metric}={score:.5f}")
         if _is_better(direction, score, best_score):
             best_score = score
@@ -275,6 +283,8 @@ def train(rnd) -> None:
     change = str(decision.get("change_summary") or f"continue baseline for {epochs} epoch(s), lr={lr}")[:900]
     reason = str(decision.get("reason") or f"validation {metric}={best_score:.5f} after {epochs} epoch(s)")[:900]
 
+    if low_cost_bearing:
+        change = f"One balanced 1/32-size training pass at lr={lr}; {len(rows)} draws."
     if head_refined:
         change = f"{change[:780]} | Refitted final linear head on public training rows (ridge=0.001)."
         reason = f"Final head improved public validation {metric} to {best_score:.6f}."
@@ -354,4 +364,6 @@ def predict(sample, model_dir):
     if isinstance(sample, list):
         return predict_batch(model, sample)
     return predict_batch(model, [{"task": sample.task, "inputs": sample.inputs}])[0]["outputs"]
+
+
 

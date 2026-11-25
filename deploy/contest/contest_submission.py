@@ -26,7 +26,7 @@ from pathlib import Path
 
 import numpy as np
 
-from engine_head import refine_head
+from engine_head import moderate_update, refine_head
 from bearing_sampling import balanced_rows
 from artifact_predict import predict_batch
 from baselines.data import read_dataset
@@ -213,6 +213,11 @@ def train(rnd) -> None:
     if low_cost_bearing:
         epochs, lr = 1, .5 * default_lr
     model.meta["learning_rate"] = lr
+    engine = dataset_key == "C" and task == "regression"
+    average_tail = engine and rnd.round_index <= 9
+    anchor = copy.deepcopy(model) if average_tail else None
+    if engine:
+        model.meta["batch_size"] = 512 if average_tail else int(config["batch_size"])
     model.validate()
 
     # ---- continue training epoch by epoch, keep the best validation state
@@ -224,7 +229,7 @@ def train(rnd) -> None:
         if dataset_key == "B" and task == "regression":
             rows = balanced_rows(train["ids"], model.meta["epochs"], model.meta["seed"], 1,
                                  divisor=32 if low_cost_bearing else 1)
-        loss = float(model.fit(train["x"][rows], train["y"][rows], 1)[0])
+        loss = float(model.fit(train["x"][rows], train["y"][rows], 1, average_tail=average_tail)[0])
         current = _metrics(model, validation)
         score = _primary(current, metric)
         history.append({"training_rows": len(train["x"]) if isinstance(rows, slice) else len(rows), "epoch": int(model.meta["epochs"]), "loss": loss, "metrics": current})
@@ -235,9 +240,11 @@ def train(rnd) -> None:
             best_model = copy.deepcopy(model)
     model = best_model
     head_refined = False
-    if late_engine and rnd.round_index == 10:
+    fraction = 1.0
+    if engine:
+        penalty = 1e-8 if rnd.round_index == 10 else .001
         refined = copy.deepcopy(model)
-        refine_head(refined, train["x"], train["y"], penalty=1e-8)
+        refine_head(refined, train["x"], train["y"], penalty=penalty)
         refined_metrics = _metrics(refined, validation)
         refined_score = _primary(refined_metrics, metric)
         if _is_better(direction, refined_score, best_score):
@@ -245,6 +252,10 @@ def train(rnd) -> None:
             best_score = refined_score
             selected_metrics = refined_metrics
             head_refined = True
+        if average_tail:
+            model, fraction = moderate_update(anchor, model, validation["x"], validation["y"])
+            selected_metrics = _metrics(model, validation)
+            best_score = _primary(selected_metrics, metric)
 
     # ---- candidate artifact (checkpoint.npz written by the baseline's own saver)
     work = WORK
@@ -263,9 +274,10 @@ def train(rnd) -> None:
 
     if low_cost_bearing:
         change = f"One 1/32-size training pass at lr={lr}; {len(rows)} draws (uniform if device groups unavailable)."
-    if head_refined:
-        change = f"{change[:780]} | Refitted final linear head on public training rows (ridge=1e-8)."
-        reason = f"Final head improved public validation {metric} to {best_score:.6f}."
+    if engine:
+        change = (f"Batch {model.meta['batch_size']}, tail averaging {average_tail}, "
+                  f"head refinement accepted {head_refined} (ridge={penalty:g}), update fraction {fraction}.")
+        reason = f"Selected update gives public validation {metric}={best_score:.6f}."
     submitted = rnd.submit_candidate(
         candidate_dir,
         hypothesis=hypothesis,

@@ -39,19 +39,19 @@ def replay(parent, train, valid, select, report, batch, average, seed, run, phas
             loss = model.fit(current_train["x"], current_train["y"], 1, average_tail=average and rnd <= warm_rounds)[0]
             steps += model.meta["steps"] - before
             errors = model.predict(valid["x"]) - valid["y"]
-            score = evaluate(errors, select)["rmse"]
+            score = float(np.sqrt(np.mean(errors[select]**2)))
             run.log({prefix+"/epoch_loss":loss, prefix+"/selection_rmse":score})
             if score < best_rmse:
                 best_model, best_rmse, best_errors = copy.deepcopy(model), score, errors
         model = best_model
         if rnd == 10 or head_each_round:
             refined = copy.deepcopy(model)
-            refine_head(refined, current_train["x"], current_train["y"], .001)
+            refine_head(refined, current_train["x"], current_train["y"], 1e-8 if rnd == 10 else .001)
             errors = refined.predict(valid["x"]) - valid["y"]
-            if evaluate(errors, select)["rmse"] < best_rmse:
+            if np.sqrt(np.mean(errors[select]**2)) < best_rmse:
                 model, best_errors = refined, errors
         fraction = 1.
-        if moderated:
+        if moderated and rnd < 10:
             model, fraction = moderate_update(anchor, model, valid["x"][select], valid["y"][select])
             best_errors = model.predict(valid["x"]) - valid["y"]
         metrics = evaluate(best_errors, report)
@@ -78,7 +78,7 @@ def main(folder, hybrid, shift_rounds, head_each, guarded):
     if not hybrid:
         schedules = [(b,a,10,False) for b,a in cases]
     run = swanlab.init(workspace="KiTongZ",project="zhixun-engine-v2",mode="online",on_online_error="raise",
-                       experiment_name=("C-moderated-update-paired" if guarded else "C-operating-subset-shifts" if shift_rounds else
+                       experiment_name=("C-v8-paired-update" if guarded else "C-operating-subset-shifts" if shift_rounds else
                                         "C-early-average-late-finetune" if hybrid else "C-batch-tail-average-engine-holdout"),
                        config={"held_engines":len(set(np.array(engines)[held])), "tail":"up to 8 equally spaced snapshots in second half of epoch",
                                "rank":"lowest mean RMSE, then worst round","baseline_batch_size":base,

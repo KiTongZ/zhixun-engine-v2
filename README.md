@@ -101,3 +101,15 @@ C 的第十轮在轮内最佳检查点上冻结隐藏层，用公开训练行拟
 docker build --platform linux/amd64 -t zhixun-predict-check:bare -f deploy/contest/tests/Dockerfile.predict-check .
 python deploy/contest/tests/isolated_predict.py PACKAGES A_CANDIDATE B_CANDIDATE C_CANDIDATE
 ```
+
+## 正式训练与评测报告
+
+平台已完成 A、B、C 各 10 轮训练与评测，客观成绩为 **12.0001 / 35**。平均性能提升 3.346373 / 15，最差阶段表现 0.280711 / 5，恢复速度 3.373016 / 5，稳定性 5 / 5，资源效率 0 / 5。
+
+| 任务 | 第 10 轮公开验证指标 | 平台报告的任务运行用时 |
+| --- | --- | ---: |
+| A · 气体识别 | 准确率 0.980362，Macro F1 0.978181 | 1,347.15 秒 |
+| B · 轴承寿命 | RMSE 633.94311 分钟，MAE 543.743545 分钟 | 678.48 秒 |
+| C · 发动机寿命 | RMSE 51.469978 循环，MAE 37.333099 循环 | 1,911.49 秒 |
+
+C 第 10 轮记录确认平台执行了输出层修正（岭惩罚 0.001）。本节的模型指标来自逐轮公开验证栏；截图未披露分任务隐藏集指标、各阶段对总分的贡献或资源效率计分明细。

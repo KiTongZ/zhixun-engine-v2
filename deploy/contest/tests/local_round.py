@@ -25,7 +25,7 @@ PROMPT = "official prompt fixture"
 def run_round(dataset: str, budget: int, run) -> None:
     from local_predict import run_predict, check_outputs
 
-    pkg = ROOT / "vendor" / "baselines" / f"{PACKAGES[dataset]}-20261110-v1"
+    pkg = Path(os.environ.get("CONTEST_BASELINE_PACKAGES", ROOT / "vendor" / "baselines")) / f"{PACKAGES[dataset]}-20261110-v1"
     output = ROOT / "out" / "contest_round"
     output.mkdir(parents=True, exist_ok=True)
     work = Path(mkdtemp(prefix=f"{dataset}-", dir=output))
@@ -186,3 +186,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

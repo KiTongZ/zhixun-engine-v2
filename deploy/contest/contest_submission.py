@@ -28,11 +28,13 @@ import numpy as np
 
 from engine_head import refine_head
 from bearing_sampling import balanced_rows
-from baselines.data import flatten, read_dataset
+from artifact_predict import predict_batch
+from baselines.data import read_dataset
 from baselines.model import Model
 
 TASKS = ("classification", "regression")
-PREDICT_ARGV = ["python3", "/app/harness.py", "predict"]
+PREDICT_ARGV = ["python3", "-B", "/model/predict.py"]
+PREDICTION_FILES = ["predict.py", "config.json", "baselines/__init__.py", "baselines/data.py", "baselines/model.py"]
 CONFIG_DIR = Path(__file__).resolve().parent / "baselines" / "configs"
 WORK = Path(os.environ.get("CONTEST_WORK", "/workspace"))
 
@@ -105,6 +107,18 @@ def _extract_json(text: str) -> dict | None:
 
 
 # ------------------------------------------------------------------ train
+def write_prediction_artifact(directory, model, config):
+    import shutil
+
+    source = Path(__file__).resolve().parent
+    model.save(directory / "checkpoint.npz")
+    (directory / "config.json").write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+    shutil.copyfile(source / "artifact_predict.py", directory / "predict.py")
+    (directory / "baselines").mkdir()
+    for name in PREDICTION_FILES[2:]:
+        shutil.copyfile(source / name, directory / name)
+
+
 def train(rnd) -> None:
     contract = rnd.task if isinstance(rnd.task, dict) else {}
     task = str(contract.get("task") or "")
@@ -254,8 +268,7 @@ def train(rnd) -> None:
         import shutil
         shutil.rmtree(candidate_dir)
     candidate_dir.mkdir(parents=True)
-    checkpoint = candidate_dir / "checkpoint.npz"
-    model.save(checkpoint)
+    write_prediction_artifact(candidate_dir, model, config)
 
     history_ids = [item["id"] for item in rnd.history()]
     hypothesis = str(decision.get("hypothesis") or f"round {rnd.round_index} continuation")[:900]
@@ -276,7 +289,7 @@ def train(rnd) -> None:
                        "history": history},
         seed=int(model.meta["seed"]),
         checkpoint_paths=["checkpoint.npz"],
-        code_paths=[],
+        code_paths=PREDICTION_FILES,
         predict_argv=PREDICT_ARGV,
     )
 
@@ -338,27 +351,7 @@ def _load(path: Path) -> Model:
 
 def predict(sample, model_dir):
     model = _load(_model_path(model_dir))
-    paths, values = flatten(sample.inputs or {})
-    if paths != model.meta["paths"]:
-        raise RuntimeError("prediction input schema does not match the checkpoint")
-    x = np.asarray(values, dtype=np.float64)[None, :]
-    predicted = model.predict(x)
-    if sample.task == "regression":
-        value = float(predicted[0])
-        if not math.isfinite(value) or value < 0:
-            value = 0.0
-        return {"value": value}
-    if sample.task != "classification":
-        raise RuntimeError("unknown prediction task")
-    probabilities = predicted[0]
-    classes = list(model.meta["classes"])
-    order = np.argsort(-probabilities)
-    scores = [float(probabilities[i]) for i in order]
-    if len(scores) >= 2 and scores[0] <= scores[1]:
-        scores[1] = max(0.0, scores[0] - 1e-6)
-    return [{"label": str(classes[int(i)]), "score": max(0.0, min(1.0, scores[rank]))}
-            for rank, i in enumerate(order)]
-
-
-
+    if isinstance(sample, list):
+        return predict_batch(model, sample)
+    return predict_batch(model, [{"task": sample.task, "inputs": sample.inputs}])[0]["outputs"]
 

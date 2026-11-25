@@ -28,12 +28,12 @@
 在仓库根目录执行：
 
 ```sh
-docker build --platform linux/amd64 -f deploy/contest/Dockerfile -t zhixun-contest:1.0.4-continuation .
-docker run --rm zhixun-contest:1.0.4-continuation describe
-docker save -o zhixun-contest-1.0.4-continuation.tar zhixun-contest:1.0.4-continuation
+docker build --platform linux/amd64 -f deploy/contest/Dockerfile -t zhixun-contest:artifact-batch-v1 .
+docker run --rm zhixun-contest:artifact-batch-v1 describe
+docker save -o zhixun-contest-artifact-batch-v1.tar zhixun-contest:artifact-batch-v1
 ```
 
-`describe` 应返回协议 `contest.harness.workspace.v2`、SDK 版本 `1.0.4` 和任务类型 `classification`、`regression`。将导出的 tar 上传到赛事平台，选择“基础模型（可正式参赛）”和 `Qwen/Qwen3.8-27B`，在平台密钥栏配置 PyTRiO API Key。平台通过镜像内的 `/app/harness.py` 调用训练和预测入口。
+`describe` 应返回协议 `contest.harness.workspace.v2`、SDK 版本 `1.0.4` 和任务类型 `classification`、`regression`。将导出的 tar 上传到赛事平台，选择“基础模型（可正式参赛）”和 `Qwen/Qwen3.8-27B`，在平台密钥栏配置 PyTRiO API Key。训练由镜像内的 `/app/harness.py` 启动。每个候选提交权重、配置、特征展开代码和独立预测入口。正式预测命令为 `python3 -B /model/predict.py`。
 
 ## 复现本地实验
 
@@ -75,7 +75,7 @@ python deploy/contest/tests/local_round.py --dataset C --epochs 3
 ## 提交信息
 
 - **模型类型**　基础模型，`Qwen/Qwen3.8-27B`
-- **Harness 镜像**　`zhixun-contest-c-late-rate.tar`，Linux/amd64
+- **Harness 镜像**　`zhixun-contest-artifact-batch-v1.tar`，Linux/amd64
 - **实验归档**　[SwanLab · zhixun-engine-v2](https://swanlab.cn/@KiTongZ/zhixun-engine-v2)
 - **项目源码**　[GitHub · KiTongZ/zhixun-engine-v2](https://github.com/KiTongZ/zhixun-engine-v2)
 
@@ -90,3 +90,14 @@ python deploy/contest/tests/local_round.py --dataset C --epochs 3
 C 的第十轮在轮内最佳检查点上冻结隐藏层，用公开训练行拟合线性输出的残差，岭惩罚系数为 0.001。公开主指标严格改善时才提交修正后的检查点。完整公开验证 RMSE 从 51.602 降到 51.407 循环，MAE 从 37.209 升至 37.302；27 台整机留出对照 RMSE 从 54.289 降至 53.773。公开集的高估误差 P95 略升，隐藏成绩待测。
 
 [训练与评估记录](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/ukyppnnd) · 候选镜像 `zhixun-contest-c-head-ridge.tar`
+
+## 预测产物隔离预检
+
+以 A、B、C 实际训练产物分别只读挂载到 /model，在仅安装 Python 和 NumPy 的 Linux 容器中关闭网络、使用非特权用户执行预测。逐一检查批量 JSON、带 samples 字段的批次、重复样本、空批次和逐行请求，验证默认路径以及显式目录和检查点参数。对照同一检查点的参考输出核对顺序和数值。
+
+在仓库根目录执行以下命令，参数依次为官方基线包根目录和三个已经生成的候选模型目录。
+
+```sh
+docker build --platform linux/amd64 -t zhixun-predict-check:bare -f deploy/contest/tests/Dockerfile.predict-check .
+python deploy/contest/tests/isolated_predict.py PACKAGES A_CANDIDATE B_CANDIDATE C_CANDIDATE
+```

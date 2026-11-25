@@ -26,6 +26,7 @@ from pathlib import Path
 
 import numpy as np
 
+from bearing_sampling import balanced_rows
 from baselines.data import flatten, read_dataset
 from baselines.model import Model
 
@@ -169,6 +170,18 @@ def train(rnd) -> None:
         "choices": {"epochs": [1, 2, 3], "learning_rate": [config["learning_rate"],
                                                             config["learning_rate"] * 2]},
     }
+    tested_budget = None
+    if rnd.round_index == 1 and parent_path is not None:
+        tested_budget = {"B": (3, 2.0), "C": (1, 0.5)}.get(dataset_key)
+    if tested_budget:
+        tested_epochs, factor = tested_budget
+        tested_lr = float(config["learning_rate"]) * factor
+        state_payload["public_validation_recommendation"] = {
+            "epochs": tested_epochs, "learning_rate": tested_lr,
+            "reason": "Lowest validation RMSE in an official-parent 3-rate comparison. Prefer this budget when applicable.",
+        }
+        state_payload["choices"]["learning_rate"] = sorted(set(
+            state_payload["choices"]["learning_rate"] + [tested_lr]))
     prompt = ("You are the decision layer of a continuation-training system. "
               "Choose the training budget for this round. Reply with one JSON object only: "
               '{"epochs": 1-3, "learning_rate": number, "hypothesis": "<=200 chars", '
@@ -181,13 +194,13 @@ def train(rnd) -> None:
     log(f"model call id={receipt.call_id} decision={decision}")
 
     try:
-        epochs = int(decision.get("epochs", 2))
+        epochs = int(decision.get("epochs", tested_epochs if tested_budget else 2))
     except (TypeError, ValueError):
         epochs = 2
     epochs = max(1, min(3, epochs))
     default_lr = float(config["learning_rate"])
     try:
-        lr = float(decision.get("learning_rate", default_lr))
+        lr = float(decision.get("learning_rate", tested_lr if tested_budget else default_lr))
     except (TypeError, ValueError):
         lr = default_lr
     if not math.isfinite(lr) or lr <= 0:
@@ -201,7 +214,10 @@ def train(rnd) -> None:
     best_score = None
     history = []
     for _ in range(epochs):
-        loss = float(model.fit(train["x"], train["y"], 1)[0])
+        rows = slice(None)
+        if dataset_key == "B" and task == "regression":
+            rows = balanced_rows(train["ids"], model.meta["epochs"], model.meta["seed"], 1)
+        loss = float(model.fit(train["x"][rows], train["y"][rows], 1)[0])
         current = _metrics(model, validation)
         score = _primary(current, metric)
         history.append({"epoch": int(model.meta["epochs"]), "loss": loss, "metrics": current})
@@ -242,6 +258,11 @@ def train(rnd) -> None:
         predict_argv=PREDICT_ARGV,
     )
 
+    candidate_metrics = _metrics(model, validation)
+    selected_id = submitted["artifact_id"]
+    selected_kind = "candidate"
+    selected_epoch = int(model.meta["epochs"])
+    selected_metrics = candidate_metrics
     state_dir = work / f"state-r{rnd.round_index}"
     if state_dir.exists():
         import shutil
@@ -249,21 +270,21 @@ def train(rnd) -> None:
     state_dir.mkdir(parents=True)
     (state_dir / "round.json").write_text(json.dumps({
         "round": rnd.round_index, "dataset_key": dataset_key, "task": task,
-        "selected": "candidate", "artifact_id": submitted["artifact_id"],
+        "selected": selected_kind, "artifact_id": selected_id, "candidate_id": submitted["artifact_id"],
         "model_call_id": receipt.call_id, "epochs": epochs, "learning_rate": lr,
         "validation_before": before, "validation_after": _metrics(model, validation),
         "history": history,
-        "selected_epoch": int(model.meta["epochs"]),
+        "selected_epoch": selected_epoch, "selected_metrics": selected_metrics,
         "parent": parent_info,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
     rnd.save_state(state_dir)
 
     rnd.finish(
-        selected_artifact_id=submitted["artifact_id"],
+        selected_artifact_id=selected_id,
         hypothesis=hypothesis,
         change_summary=change,
         reason=reason,
-        configuration={"round": rnd.round_index, "epochs": epochs, "learning_rate": lr,
+        configuration={"round": rnd.round_index, "selected": selected_kind, "selected_metrics": selected_metrics, "epochs": epochs, "learning_rate": lr,
                        "validation_after": _metrics(model, validation),
                        "model_call_id": receipt.call_id},
         seed=int(model.meta["seed"]),
@@ -315,3 +336,5 @@ def predict(sample, model_dir):
         scores[1] = max(0.0, scores[0] - 1e-6)
     return [{"label": str(classes[int(i)]), "score": max(0.0, min(1.0, scores[rank]))}
             for rank, i in enumerate(order)]
+
+

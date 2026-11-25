@@ -222,9 +222,8 @@ def train(rnd) -> None:
     for _ in range(epochs):
         rows = slice(None)
         if dataset_key == "B" and task == "regression":
-            rows = balanced_rows(train["ids"], model.meta["epochs"], model.meta["seed"], 1)
-            if low_cost_bearing:
-                rows = rows[:max(1, round(len(rows) / 32))]
+            rows = balanced_rows(train["ids"], model.meta["epochs"], model.meta["seed"], 1,
+                                 divisor=32 if low_cost_bearing else 1)
         loss = float(model.fit(train["x"][rows], train["y"][rows], 1)[0])
         current = _metrics(model, validation)
         score = _primary(current, metric)
@@ -263,9 +262,9 @@ def train(rnd) -> None:
     reason = str(decision.get("reason") or f"validation {metric}={best_score:.5f} after {epochs} epoch(s)")[:900]
 
     if low_cost_bearing:
-        change = f"One balanced 1/32-size training pass at lr={lr}; {len(rows)} draws."
+        change = f"One 1/32-size training pass at lr={lr}; {len(rows)} draws (uniform if device groups unavailable)."
     if head_refined:
-        change = f"{change[:780]} | Refitted final linear head on public training rows (ridge=0.001)."
+        change = f"{change[:780]} | Refitted final linear head on public training rows (ridge=1e-8)."
         reason = f"Final head improved public validation {metric} to {best_score:.6f}."
     submitted = rnd.submit_candidate(
         candidate_dir,

@@ -95,7 +95,7 @@ class Model:
         hidden = np.tanh(x @ self.params["w1"] + self.params["b1"])
         return hidden, hidden @ self.params["w2"] + self.params["b2"]
 
-    def fit(self, x, y, epochs):
+    def fit(self, x, y, epochs, *, average_tail=False):
         if type(epochs) is not int or not 1 <= epochs <= 10000:
             raise ValueError("epochs must be between 1 and 10000")
         x = self.normalized(x)
@@ -113,6 +113,10 @@ class Model:
             rng = np.random.default_rng(np.random.SeedSequence([self.meta["seed"], self.meta["epochs"]]))
             order = rng.permutation(len(x))
             loss_sum = 0.0
+            if average_tail:
+                batches = math.ceil(len(order) / self.meta["batch_size"])
+                sample_steps = set(np.linspace(batches // 2, batches - 1, min(8, batches - batches // 2), dtype=int))
+                sums = {name: np.zeros_like(param) for name, param in self.params.items()}
             for start in range(0, len(order), self.meta["batch_size"]):
                 indices = order[start:start + self.meta["batch_size"]]
                 batch, expected = x[indices], target[indices]
@@ -145,6 +149,12 @@ class Model:
                     self.params[name] -= self.meta["learning_rate"] * first / (np.sqrt(second) + 1e-8)
                 if not all(np.all(np.isfinite(p)) for p in self.params.values()):
                     raise ValueError("nonfinite model state")
+                if average_tail and start // self.meta["batch_size"] in sample_steps:
+                    for name in PARAMETERS:
+                        sums[name] += self.params[name]
+            if average_tail:
+                for name in PARAMETERS:
+                    self.params[name] = sums[name] / len(sample_steps)
             self.meta["epochs"] += 1
             epoch_losses.append(loss_sum / len(x))
         self.validate()

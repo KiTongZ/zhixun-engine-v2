@@ -1,0 +1,51 @@
+"""Compare candidate data loading with the previously submitted implementation."""
+import argparse
+import statistics
+import subprocess
+import sys
+import time
+import types
+from pathlib import Path
+import numpy as np
+import swanlab
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+from baselines import data
+from baselines.model import Model
+
+def main(folder):
+    repo=Path(__file__).resolve().parents[3]
+    prior=types.ModuleType("prior_data")
+    code=subprocess.check_output(["git","show","6ea97e2:deploy/contest/baselines/data.py"],cwd=repo)
+    exec(compile(code,"prior_data.py","exec"),prior.__dict__)
+    invalid=[{"true_RUL":1},{"x":True},{"x":float("inf")},{"x":None},[]]
+    for value in invalid:
+        for loader in (prior,data):
+            try: loader.flatten(value)
+            except ValueError: continue
+            raise AssertionError(value)
+    run=swanlab.init(workspace="KiTongZ",project="zhixun-engine-v2",mode="online",on_online_error="raise",
+                     experiment_name="ABC-feature-path-cache-parity",config={"baseline":"6ea97e2","repeats":3,"scope":"JSONL loader CPU time"})
+    for key in "ABC":
+        pack=next(folder.glob("cpu-"+key.lower()+"-*"))
+        model=Model.load(pack/"checkpoint.npz")
+        for split in ("train","validation"):
+            times={"old":[],"new":[]}
+            for rep in range(3):
+                outputs={}
+                for label in (("old","new") if rep%2==0 else ("new","old")):
+                    start=time.process_time()
+                    loader=prior if label=="old" else data
+                    outputs[label]=loader.read_dataset(pack/"public"/(split+".jsonl"),model.meta["task"],model.meta["classes"],model.meta["paths"])
+                    times[label].append(time.process_time()-start)
+                a,b=outputs["old"],outputs["new"]
+                for k in ("ids","paths","sha256"): assert a[k]==b[k]
+                for k in ("x","y"): np.testing.assert_array_equal(a[k],b[k])
+                np.testing.assert_array_equal(model.predict(a["x"]),model.predict(b["x"]))
+                run.log({f"{key}/{split}/{label}_cpu_s":t[-1] for label,t in times.items()})
+            print(key,split,len(a["ids"]),{k:round(statistics.median(v),3) for k,v in times.items()},flush=True)
+    run.finish()
+
+if __name__=="__main__":
+    parser=argparse.ArgumentParser()
+    parser.add_argument("packages",type=Path)
+    main(parser.parse_args().packages)

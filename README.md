@@ -123,3 +123,19 @@ C 第 10 轮记录确认平台执行了输出层修正（岭惩罚 0.001）。�
 完整公开集三种抽样种子的十轮末 RMSE 均值从 647.11 降至 642.07 分钟，其中一个种子退步。三种子十轮平均改善为 5.31% → 4.94%，最差轮改善均值为 2.86% → 2.54%。标准种子真实训练入口回放末轮 RMSE 为 624.40 分钟。十轮处理的训练行次从 147,672 降到 23,076；线上 Token 与资源效率分待评测。此候选尚未送正式评测。
 
 [初筛](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/o1dwy931) · [半量复核](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/7mkog8b9) · [三种子对照](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/h2xla2wu) · [小预算九折复核](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/bd9idmxv) · [最终入口回放](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/9gipavjh)
+
+## 最新本地候选 · 特征路径缓存
+
+本版沿用轴承小预算方案，将重复的特征路径编码及字段名检查结果缓存在进程内。缓存容量分别为 4,096 和 1,024 项，每条输入的数值仍逐项校验。相同检查点读取两版数据所得的特征、标签、样本顺序和预测在六个公开数据分片上逐项一致。
+
+以下为同一台电脑上各三次读取的 CPU 时间中位数，单位为秒。
+
+| 任务 | 训练集（原版 → 新版） | 验证集（原版 → 新版） |
+| --- | ---: | ---: |
+| A 气体识别 | 0.219 → 0.047 | 0.859 → 0.250 |
+| B 轴承寿命 | 1.719 → 0.797 | 0.266 → 0.062 |
+| C 发动机寿命 | 9.797 → 3.109 | 2.328 → 0.922 |
+
+以上只计数据读取与校验。平台总用时、资源效率得分和各任务隐藏集表现仍待正式评测。镜像归档经重新加载并通过 describe 检查。使用新版代码重新打包三个任务的模型产物，三种启动参数共九次隔离预测测试均通过。[效率与预测一致性实验](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/1ifa06g4)
+
+气体识别另跑了四组共 52 个十轮筛选配置（含各组对照）。从同一父检查点比较分类输出层融合、特征幅度扰动与类别平衡、传感器或特征随机遮挡、类别偏置修正。完整公开验证回放未显示可复现的优势，候选沿用原有分类模型。[输出层](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/edvm3r5c) · [幅度与类别平衡](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/4z4solhs) · [随机遮挡](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/xyjl6gqg) · [偏置修正](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/lk9c3z8o)

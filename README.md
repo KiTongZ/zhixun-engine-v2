@@ -216,3 +216,18 @@ C 第 10 轮记录确认平台执行了输出层修正（岭惩罚 0.001）。�
 
 [NASA 工况资料](https://data.nasa.gov/dataset/cmapss-jet-engine-simulated-data) · [按整机分组验证](https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.GroupKFold.html) · [早停研究](https://pubmed.ncbi.nlm.nih.gov/12662814/) · [SwanLab 成对回放](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/nzs2iky6) · [断网容器训练](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/38loiqtg)
 同预算对照的 30 对检查点逐字节一致。检索让 C 每轮提示的字符数中位数从 314 增至 418，实际新增 Token 以真实网关计量为准。与工况校正版相比，归档增加 7.5 KiB。
+
+## 4 核、4 GiB 本地测试
+
+训练和独立预测的 Docker 测试命令使用 `--cpus 4 --memory 4g --memory-swap 4g`。训练入口和独立预测脚本在导入 NumPy 之前初始化 BLAS 线程配置，默认每进程使用 1 个 BLAS 线程，可用 `BASELINE_CPU_THREADS` 做显式对照。
+
+在旧镜像上挂载同一份 C 公开数据，测量两轮单机训练、校正拟合与验证前向。每种设置在 4 核、4 GiB 与断网条件下重复三次，取中位数。
+
+| OpenBLAS 实际线程数 | 墙钟秒 | 进程 CPU 秒 |
+| ---: | ---: | ---: |
+| 24，旧默认设置 | 0.5940 | 1.9731 |
+| 1 | 0.3271 | 0.3256 |
+| 2 | 0.3089 | 0.4612 |
+| 4 | 0.3197 | 0.7552 |
+
+四种设置的公开 RMSE 在记录到的九位小数一致。单线程相比旧默认的墙钟时间缩短约 45%，CPU 时间减少约 84%。本地干净进程已确认源码修复后两个入口默认都初始化为 1 个线程，显式配置 2 时训练入口初始化为 2。新版归档需要通过 Docker 重建后再核实。

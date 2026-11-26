@@ -4,11 +4,11 @@ import json
 import sys
 from pathlib import Path
 
-import numpy as np
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from baselines.data import flatten
+# Model initializes the BLAS thread limit before importing NumPy.
 from baselines.model import Model
+import numpy as np
+from baselines.data import flatten
 
 
 def load_artifact(location):

@@ -27,7 +27,8 @@ def check(package, key, runtime, artifact):
         samples = [{"task":task, "inputs":json.loads(next(f))["inputs"]} for _ in range(5)]
     ordered = [samples[i] for i in (4, 1, 0, 2, 1)]
     expected = model.predict(np.array([flatten(row["inputs"])[1] for row in ordered]))
-    command = ["docker", "run", "--rm", "-i", "--network", "none", "--read-only",
+    command = ["docker", "run", "--rm", "-i", "--cpus", "4", "--memory", "4g",
+               "--memory-swap", "4g", "--network", "none", "--read-only",
                "--user", "65534:65534", "--mount", f"type=bind,source={artifact},target=/model,readonly",
                runtime, *PREDICT_ARGV]
     for extra in ([], ["--checkpoint", "/model/checkpoint.npz"], ["--model-dir", "/model"]):

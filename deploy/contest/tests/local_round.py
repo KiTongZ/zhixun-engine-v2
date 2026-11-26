@@ -114,7 +114,8 @@ def run_round(dataset: str, budget: int, run, runtime: str | None = None) -> Non
         projection = start["task_contract"]["public_projection"]
         projection.update(train_path="/data/train.jsonl", validation_path="/data/validation.jsonl")
         command = [
-            "docker", "run", "--rm", "-i", "--read-only", "--network", "none",
+            "docker", "run", "--rm", "-i", "--cpus", "4", "--memory", "4g",
+            "--memory-swap", "4g", "--read-only", "--network", "none",
             "--mount", f"type=bind,source={pkg / 'public'},target=/data,readonly",
             "--mount", f"type=bind,source={parent_dir},target=/parent,readonly",
             "--mount", f"type=bind,source={work / 'workspace'},target=/workspace",

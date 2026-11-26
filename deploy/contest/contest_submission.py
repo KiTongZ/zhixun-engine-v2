@@ -25,6 +25,8 @@ import sys
 import time
 from pathlib import Path
 
+# Model initializes the BLAS thread limit before importing NumPy.
+from baselines.model import Model
 import numpy as np
 
 from engine_head import refine_head
@@ -32,7 +34,6 @@ from bearing_sampling import balanced_rows
 from artifact_predict import load_artifact, predict_batch
 from engine_calibration import CalibratedModel, ENGINE_PATHS, fit_calibration, validation_allows_calibration
 from baselines.data import read_dataset
-from baselines.model import Model
 
 TASKS = ("classification", "regression")
 PREDICT_ARGV = ["python3", "-B", "/model/predict.py"]

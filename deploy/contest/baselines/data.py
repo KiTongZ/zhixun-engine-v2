@@ -53,7 +53,27 @@ def _numeric_list_paths(path, size):
     return tuple(_encoded_path(path + (("index", index),)) for index in range(size))
 
 
+ENGINE_PATHS = [
+    *_numeric_list_paths((("key", "sensors"),), 21),
+    *_numeric_list_paths((("key", "settings"),), 3),
+]
+_ENGINE_KEYS = frozenset(("sensors", "settings"))
+_FEATURE_BATCH_ROWS = 2048
+
+
+def _finite_numbers(values):
+    return all((type(value) is float or type(value) is int) and math.isfinite(value)
+               for value in values)
+
+
 def flatten(inputs):
+    if type(inputs) is dict and inputs.keys() == _ENGINE_KEYS:
+        sensors, settings = inputs["sensors"], inputs["settings"]
+        if type(sensors) is list and len(sensors) == 21 and type(settings) is list and len(settings) == 3:
+            combined = sensors + settings
+            if _finite_numbers(combined):
+                return ENGINE_PATHS.copy(), list(map(float, combined))
+
     paths, values = [], []
     def visit(value, path, depth):
         if depth > 16:
@@ -103,6 +123,7 @@ def read_dataset(path, task, classes=None, expected_paths=None):
     if not path.is_file() or path.is_symlink() or path.stat().st_size > MAX_BYTES:
         raise ValueError("dataset must be a regular JSONL file no larger than 128 MiB")
     ids, features, targets = [], [], []
+    feature_batches = []
     seen = set()
     paths = expected_paths
     digest = hashlib.sha256()
@@ -132,8 +153,14 @@ def read_dataset(path, task, classes=None, expected_paths=None):
         else:
             raise ValueError("unsupported task")
         ids.append(identity); seen.add(identity); features.append(values); targets.append(target)
+        if len(features) == _FEATURE_BATCH_ROWS:
+            feature_batches.append(np.asarray(features, dtype=np.float64))
+            features.clear()
     if not ids:
         raise ValueError("dataset is empty")
-    return {"ids": ids, "x": np.asarray(features, dtype=np.float64),
+    if features:
+        feature_batches.append(np.asarray(features, dtype=np.float64))
+    matrix = feature_batches[0] if len(feature_batches) == 1 else np.concatenate(feature_batches, axis=0)
+    return {"ids": ids, "x": matrix,
             "y": np.asarray(targets, dtype=np.int64 if task == "classification" else np.float64),
             "paths": paths, "sha256": "sha256:" + digest.hexdigest()}

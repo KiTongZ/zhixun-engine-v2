@@ -1,20 +1,15 @@
 """C snapshot calibration fitted to the current public training projection."""
 import numpy as np
-
-
-# Canonical flattening sorts sensors before settings.
-ENGINE_PATHS = [
-    f'[["key","{field}"],["index",{index}]]'
-    for field, count in (("sensors", 21), ("settings", 3))
-    for index in range(count)
-]
+from baselines.data import ENGINE_PATHS
 
 
 def _design(x, conditions, center, scale):
-    known, indices = np.nonzero(np.rint(x[:, 21, None]) == conditions)
+    operating = np.rint(x[:, 21])
     design = np.zeros((len(x), 21 + len(conditions)))
-    design[known, :21] = np.clip((x[known, :21] - center[indices]) / scale[indices], -8.0, 8.0)
-    design[known, 21 + indices] = 1.0
+    for index, condition in enumerate(conditions):
+        rows = operating == condition
+        design[rows, :21] = np.clip((x[rows, :21] - center[index]) / scale[index], -8.0, 8.0)
+        design[rows, 21 + index] = 1.0
     return design
 
 
@@ -66,15 +61,16 @@ class CalibratedModel:
             raise ValueError("invalid engine calibration")
 
     def predict(self, x):
-        base = self.parent.predict(x)
+        return self.apply(x, self.parent.predict(x))
+
+    def apply(self, x, base):
         design = _design(x, self.conditions, self.center, self.scale)
         return np.maximum(0, base + design @ self.coefficient)
 
 
-def validation_allows_calibration(model, corrected, validation):
-    y = validation["y"]
-    original = (model.predict(validation["x"]) - y) ** 2
-    candidate = (corrected.predict(validation["x"]) - y) ** 2
+def validation_allows_calibration(y, base_error, corrected_error):
+    original = base_error ** 2
+    candidate = corrected_error ** 2
     if float(candidate.mean()) >= float(original.mean()):
         return False
     return all(not mask.any() or float(candidate[mask].mean()) <= float(original[mask].mean())

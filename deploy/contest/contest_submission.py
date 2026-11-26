@@ -32,8 +32,8 @@ import numpy as np
 from engine_head import refine_head
 from bearing_sampling import balanced_rows
 from artifact_predict import load_artifact, predict_batch
-from engine_calibration import CalibratedModel, ENGINE_PATHS, fit_calibration, validation_allows_calibration
-from baselines.data import read_dataset
+from engine_calibration import CalibratedModel, fit_calibration, validation_allows_calibration
+from baselines.data import ENGINE_PATHS, read_dataset
 
 TASKS = ("classification", "regression")
 PREDICT_ARGV = ["python3", "-B", "/model/predict.py"]
@@ -75,7 +75,10 @@ def _metrics(model: Model, data: dict) -> dict:
             den = np.sum(labels == label) + np.sum(expected == label)
             f1.append(2 * tp / den if den else 0.0)
         return {"macro_f1": float(np.mean(f1)), "accuracy": float(np.mean(labels == expected))}
-    error = predicted - data["y"]
+    return _regression_metrics(predicted - data["y"])
+
+
+def _regression_metrics(error: np.ndarray) -> dict:
     return {"rmse": float(np.sqrt(np.mean(error ** 2))), "mae": float(np.mean(np.abs(error)))}
 
 
@@ -317,9 +320,13 @@ def train(rnd) -> None:
         correction = fit_calibration(model, train)
         if correction is not None:
             corrected = CalibratedModel(model, correction)
-            if validation_allows_calibration(model, corrected, validation):
+            x, y = validation["x"], validation["y"]
+            base_prediction = model.predict(x)
+            base_error = base_prediction - y
+            corrected_error = corrected.apply(x, base_prediction) - y
+            if validation_allows_calibration(y, base_error, corrected_error):
                 calibration_note = {"condition_calibrated": True, "base_candidate_metrics": selected_metrics}
-                selected_metrics = _metrics(corrected, validation)
+                selected_metrics = _regression_metrics(corrected_error)
                 best_score = _primary(selected_metrics, metric)
                 config["engine_calibration"] = correction
 

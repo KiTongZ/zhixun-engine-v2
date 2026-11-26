@@ -1,0 +1,6 @@
+{
+  "acetaldehyde_cross_batch": {
+    "source": "https://doi.org/10.1016/j.dib.2015.01.003",
+    "advice": "Gas-sensor response can drift across time and concentrations. When one confusion dominates, keep the recommended budget unless this batch provides evidence for changing it. Check class recall with precision and macro F1."
+  }
+}

@@ -39,6 +39,7 @@ TASKS = ("classification", "regression")
 PREDICT_ARGV = ["python3", "-B", "/model/predict.py"]
 PREDICTION_FILES = ["predict.py", "config.json", "baselines/__init__.py", "baselines/data.py", "baselines/model.py"]
 CONFIG_DIR = Path(__file__).resolve().parent / "baselines" / "configs"
+A_STRATEGIES = Path(__file__).resolve().with_name("a_strategy_library.json")
 C_STRATEGIES = Path(__file__).resolve().with_name("c_strategy_library.json")
 WORK = Path(os.environ.get("CONTEST_WORK", "/workspace"))
 
@@ -63,8 +64,9 @@ def _config(dataset_key: str, task: str) -> dict:
 
 
 # ------------------------------------------------------------------ metrics
-def _metrics(model: Model, data: dict) -> dict:
-    predicted = model.predict(data["x"])
+def _metrics(model: Model, data: dict, predicted: np.ndarray | None = None) -> dict:
+    if predicted is None:
+        predicted = model.predict(data["x"])
     if model.meta["task"] == "classification":
         labels = predicted.argmax(axis=1)
         expected = data["y"]
@@ -76,6 +78,22 @@ def _metrics(model: Model, data: dict) -> dict:
             f1.append(2 * tp / den if den else 0.0)
         return {"macro_f1": float(np.mean(f1)), "accuracy": float(np.mean(labels == expected))}
     return _regression_metrics(predicted - data["y"])
+
+
+def _acetaldehyde_diagnostic(classes, expected, labels):
+    index = classes.index("Acetaldehyde")
+    predictions = labels[expected == index]
+    if predictions.size < 10:
+        return None
+    counts = np.bincount(predictions, minlength=len(classes))
+    correct = int(counts[index])
+    counts[index] = 0
+    confused = int(counts.argmax())
+    if correct * 2 >= predictions.size or counts[confused] * 2 < predictions.size:
+        return None
+    return {"class": classes[index], "n": int(predictions.size), "correct": correct,
+            "precision": round(correct / max(1, int(np.count_nonzero(labels == index))), 3),
+            "confused_with": classes[confused], "confused_n": int(counts[confused])}
 
 
 def _regression_metrics(error: np.ndarray) -> dict:
@@ -177,7 +195,13 @@ def train(rnd) -> None:
                       batch_size=int(config["batch_size"]))
         log("no parent checkpoint: initialised from the official baseline constructor")
 
-    before = _metrics(model, validation)
+    acetaldehyde = None
+    if dataset_key == "A" and task == "classification" and "Acetaldehyde" in classes:
+        parent_predictions = model.predict(validation["x"])
+        before = _metrics(model, validation, parent_predictions)
+        acetaldehyde = _acetaldehyde_diagnostic(classes, validation["y"], parent_predictions.argmax(axis=1))
+    else:
+        before = _metrics(model, validation)
     prepared = time.perf_counter()
 
     # ---- one real platform model call decides the continuation budget
@@ -210,6 +234,12 @@ def train(rnd) -> None:
     if low_cost_bearing:
         state_payload["sampling_fraction"] = 1 / bearing_divisor
     retrieval_note = {}
+    if acetaldehyde:
+        key = "acetaldehyde_cross_batch"
+        card = json.loads(A_STRATEGIES.read_text(encoding="utf-8"))[key]
+        state_payload.update(class_diagnostic=acetaldehyde, strategy=card["advice"])
+        retrieval_note = {"retrieved_strategy": key, "strategy_source": card["source"],
+                          "class_diagnostic": acetaldehyde}
     if dataset_key == "C" and task == "regression" and model.meta["paths"] == ENGINE_PATHS:
         regimes = np.unique(np.rint(train["x"][:, 21])).size
         if rnd.round_index == 1 and regimes > 1:

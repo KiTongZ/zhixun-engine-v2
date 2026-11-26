@@ -41,6 +41,11 @@ def _allowed_key(key):
     return re.sub(r"[^a-z0-9]", "", key.lower()) not in FORBIDDEN_INPUTS
 
 
+@lru_cache(maxsize=128)
+def _numeric_list_paths(path, size):
+    return tuple(_encoded_path(path + (("index", index),)) for index in range(size))
+
+
 def flatten(inputs):
     paths, values = [], []
     def visit(value, path, depth):
@@ -52,8 +57,14 @@ def flatten(inputs):
                     raise ValueError("target-derived input field is not allowed")
                 visit(value[key], path + (("key", key),), depth + 1)
         elif isinstance(value, list):
-            for index, child in enumerate(value):
-                visit(child, path + (("index", index),), depth + 1)
+            if depth < 16 and 0 < len(value) <= 256 and all(
+                type(child) in (int, float) and math.isfinite(child) for child in value
+            ):
+                paths.extend(_numeric_list_paths(path, len(value)))
+                values.extend(map(float, value))
+            else:
+                for index, child in enumerate(value):
+                    visit(child, path + (("index", index),), depth + 1)
         elif isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
             paths.append(_encoded_path(path))
             values.append(float(value))

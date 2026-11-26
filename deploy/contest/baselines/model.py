@@ -136,12 +136,16 @@ class Model:
                 if not math.isfinite(norm):
                     raise ValueError("nonfinite gradient")
                 self.meta["steps"] += 1
+                step = self.meta["steps"]
+                clip = min(1.0, 5.0 / max(norm, 1e-12))
+                first_bias = 1 - .9 ** step
+                second_bias = 1 - .999 ** step
                 for name, gradient in gradients.items():
-                    gradient *= min(1.0, 5.0 / max(norm, 1e-12))
+                    gradient *= clip
                     self.first[name] = .9 * self.first[name] + .1 * gradient
                     self.second[name] = .999 * self.second[name] + .001 * gradient ** 2
-                    first = self.first[name] / (1 - .9 ** self.meta["steps"])
-                    second = self.second[name] / (1 - .999 ** self.meta["steps"])
+                    first = self.first[name] / first_bias
+                    second = self.second[name] / second_bias
                     self.params[name] -= self.meta["learning_rate"] * first / (np.sqrt(second) + 1e-8)
                 if not all(np.all(np.isfinite(p)) for p in self.params.values()):
                     raise ValueError("nonfinite model state")

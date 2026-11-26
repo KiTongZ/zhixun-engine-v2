@@ -27,7 +27,7 @@ def replay(package, work, dataset="B"):
             budget = {"epochs": 1 if index == 1 else 2, "learning_rate": .001 if index == 1 else .002 if index <= 5 else .004}
         current = f"round-{index}"
         record = {}
-        rnd = SimpleNamespace(dataset_key=dataset, round_index=index, call_ids=["local"],
+        rnd = SimpleNamespace(dataset_key=dataset, round_index=index, call_ids=["local"], max_output_tokens=320,
             task={"task":"regression","public_projection":{f"{s}_path":package/"public"/(s+".jsonl") for s in ("train","validation")}},
             parent=SimpleNamespace(artifact_id=parent_id, descriptor={"checkpoint_paths":["checkpoint.npz"]},
                                    path=lambda name,root: checkpoint),

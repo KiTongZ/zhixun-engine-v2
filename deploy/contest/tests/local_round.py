@@ -22,7 +22,7 @@ from tests.support import Host  # noqa: E402
 PROMPT = "official prompt fixture"
 
 
-def run_round(dataset: str, budget: int, run) -> None:
+def run_round(dataset: str, budget: int, run, runtime: str | None = None) -> None:
     from local_predict import run_predict, check_outputs
 
     pkg = Path(os.environ.get("CONTEST_BASELINE_PACKAGES", ROOT / "vendor" / "baselines")) / f"{PACKAGES[dataset]}-20261110-v1"
@@ -108,12 +108,25 @@ def run_round(dataset: str, budget: int, run) -> None:
     env["CONTEST_WORK"] = str(work / "workspace")
     env["CONTEST_PARENT_ROOT"] = str(parent_dir)
     env["PYTHONIOENCODING"] = "utf-8"
+    command = [sys.executable, str(CONTEST / "harness.py"), "train"]
+    if runtime:
+        (work / "workspace").mkdir()
+        projection = start["task_contract"]["public_projection"]
+        projection.update(train_path="/data/train.jsonl", validation_path="/data/validation.jsonl")
+        command = [
+            "docker", "run", "--rm", "-i", "--read-only", "--network", "none",
+            "--mount", f"type=bind,source={pkg / 'public'},target=/data,readonly",
+            "--mount", f"type=bind,source={parent_dir},target=/parent,readonly",
+            "--mount", f"type=bind,source={work / 'workspace'},target=/workspace",
+            "-e", "CONTEST_PARENT_ROOT=/parent", "-e", "CONTEST_WORK=/workspace",
+            runtime, "train",
+        ]
 
     host = Host(start, stub_model)
     stderr_path = work / "train.stderr.log"
     with stderr_path.open("w", encoding="utf-8") as stderr:
         with subprocess.Popen(
-            [sys.executable, str(CONTEST / "harness.py"), "train"],
+            command,
             cwd=CONTEST, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=stderr, text=True, encoding="utf-8",
         ) as proc:
@@ -164,6 +177,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", choices=PACKAGES, default="A")
     parser.add_argument("--epochs", choices=(1, 2, 3), type=int, default=1)
+    parser.add_argument("--runtime", help="Run the training entry in this Docker image")
     args = parser.parse_args()
 
     import swanlab
@@ -173,10 +187,11 @@ def main() -> None:
         on_online_error="raise", name=f"official-{args.dataset}-local-{args.epochs}ep",
         log_dir=str(ROOT / "out" / "swanlog"),
         config={"dataset": args.dataset, "requested_epochs": args.epochs,
-                "model_gateway": "SDK host stub", "evaluation": "official public validation"},
+                "model_gateway": "SDK host stub", "evaluation": "official public validation",
+                "runtime": args.runtime or "host Python"},
     )
     try:
-        run_round(args.dataset, args.epochs, run)
+        run_round(args.dataset, args.epochs, run, args.runtime)
     except Exception as exc:
         run.finish(state="crashed", error=str(exc))
         raise

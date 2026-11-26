@@ -1,4 +1,4 @@
-"""Replay both entries on public data with the same budgets and compare checkpoints."""
+"""Replay two entries at equal budgets and verify parity outside selected tasks."""
 import argparse
 import json
 import statistics
@@ -13,14 +13,14 @@ from types import SimpleNamespace
 import swanlab
 
 CONTEST = Path(__file__).resolve().parents[1]
-BASELINE = "59fff6c"
+BASELINE = "ba319e8"
 sys.path.insert(0, str(CONTEST))
 import contest_submission as current
 
 
-def load_baseline(relative):
+def load_revision(relative, revision):
     name = "deploy/contest/" + relative
-    source = subprocess.check_output(["git", "show", f"{BASELINE}:{name}"], cwd=CONTEST)
+    source = subprocess.check_output(["git", "show", f"{revision}:{name}"], cwd=CONTEST)
     module = types.ModuleType("baseline_" + Path(relative).stem)
     module.__file__ = str(CONTEST / relative)
     exec(compile(source, module.__file__, "exec"), module.__dict__)
@@ -56,7 +56,8 @@ def replay(entry, package, dataset, work, round_index, checkpoint, run, label):
                 response = json.dumps({"e": epochs, "l": rate})
         else:
             response = json.dumps({"epochs": epochs, "learning_rate": rate})
-        return SimpleNamespace(text=response, call_id=call_ids[0])
+        return SimpleNamespace(text=response, call_id=call_ids[0],
+                               response={"usage": {"prompt_tokens": 12, "completion_tokens": 9, "total_tokens": 21}})
 
     rnd = SimpleNamespace(
         dataset_key=dataset, round_index=round_index, max_output_tokens=320, model=model,
@@ -77,6 +78,11 @@ def replay(entry, package, dataset, work, round_index, checkpoint, run, label):
     assert recorded["model_call_ids"] == call_ids == ["local-call"]
     config = recorded["configuration"]
     assert (config["epochs"], config["learning_rate"]) == (epochs, rate)
+    if "resource_usage" in config:
+        usage = config["resource_usage"]
+        assert usage["model_tokens"]["total_tokens"] == 21
+        assert usage["model_tokens"]["requested_max_tokens"] == 64
+        assert set(usage["seconds"]) == {"prepare_s", "gateway_s", "train_and_select_s", "package_s", "submit_s", "save_state_s"}
     run.log({f"{dataset}/{label}/{k}": v for k, v in {
         "round": round_index, "cpu_s": recorded["cpu_s"], "output_cap": recorded["output_cap"],
         "prompt_chars": recorded["prompt_chars"], **config["selected_metrics"],
@@ -84,15 +90,17 @@ def replay(entry, package, dataset, work, round_index, checkpoint, run, label):
     return work / f"candidate-r{round_index}" / "checkpoint.npz", recorded
 
 
-def compare(packages, work, run):
-    prior = load_baseline("contest_submission.py")
-    prior.Model = load_baseline("baselines/model.py").Model
-    prior.read_dataset = load_baseline("baselines/data.py").read_dataset
+def compare(packages, work, run, baseline, changed):
+    prior = load_revision("contest_submission.py", baseline)
+    prior.Model = load_revision("baselines/model.py", baseline).Model
+    prior.read_dataset = load_revision("baselines/data.py", baseline).read_dataset
     for dataset in "ABC":
         package = next(packages.glob(f"cpu-{dataset.lower()}-*"))
         checkpoints = {label: package / "checkpoint.npz" for label in ("baseline", "candidate")}
         cpu = {label: [] for label in checkpoints}
         chars = {label: [] for label in checkpoints}
+        scores = {label: [] for label in checkpoints}
+        metric = "macro_f1" if dataset == "A" else "rmse"
         for round_index in range(1, 11):
             records = {}
             order = ("baseline", "candidate") if round_index % 2 else ("candidate", "baseline")
@@ -101,21 +109,28 @@ def compare(packages, work, run):
                 checkpoints[label], rec = replay(entry, package, dataset, work / dataset / label,
                                                  round_index, checkpoints[label], run, label)
                 records[label] = rec["configuration"]["selected_metrics"]
+                scores[label].append(records[label][metric])
                 cpu[label].append(rec["cpu_s"])
                 chars[label].append(rec["prompt_chars"])
-            assert records["baseline"] == records["candidate"], (dataset, round_index, records)
-            assert checkpoints["baseline"].read_bytes() == checkpoints["candidate"].read_bytes(), (dataset, round_index)
-        print(dataset, "10 byte-identical checkpoints;", "CPU seconds", {k: round(sum(v), 3) for k, v in cpu.items()},
+            if dataset not in changed:
+                assert records["baseline"] == records["candidate"], (dataset, round_index, records)
+                assert checkpoints["baseline"].read_bytes() == checkpoints["candidate"].read_bytes(), (dataset, round_index)
+        print(dataset, "10 rounds;", "CPU seconds", {k: round(sum(v), 3) for k, v in cpu.items()},
               "median prompt chars", {k: statistics.median(v) for k, v in chars.items()}, records["candidate"], flush=True)
+        worst = min if dataset == "A" else max
+        print(dataset, "score mean, worst, final", {k: (statistics.mean(v), worst(v), v[-1]) for k, v in scores.items()}, flush=True)
         run.log({f"{dataset}/{k}/total_cpu_s": sum(v) for k, v in cpu.items()})
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("packages", type=Path)
+    parser.add_argument("--baseline", default=BASELINE)
+    parser.add_argument("--changed", default="AC", help="Datasets whose policy changed")
     args = parser.parse_args()
     with swanlab.init(workspace="KiTongZ", project="zhixun-engine-v2", mode="online", on_online_error="raise",
                       experiment_name="feature-cache-efficient-abc-paired-replay",
-                      config={"baseline": BASELINE, "rounds": 10, "model_gateway": "local stub"}) as run:
+                      config={"baseline": args.baseline, "changed": args.changed, "rounds": 10,
+                              "model_gateway": "local stub", "usage": "synthetic test fixture"}) as run:
         with tempfile.TemporaryDirectory() as folder:
-            compare(args.packages, Path(folder), run)
+            compare(args.packages, Path(folder), run, args.baseline, args.changed)

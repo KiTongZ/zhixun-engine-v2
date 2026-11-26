@@ -25,10 +25,17 @@ def unique_object(pairs):
     return result
 
 
+def _reject_constant(_):
+    raise ValueError("nonfinite JSON number")
+
+
+_DECODER = json.JSONDecoder(object_pairs_hook=unique_object, parse_constant=_reject_constant)
+
+
 def json_value(raw):
-    def reject(_):
-        raise ValueError("nonfinite JSON number")
-    return json.loads(raw, object_pairs_hook=unique_object, parse_constant=reject)
+    if isinstance(raw, str):
+        return _DECODER.decode(raw)
+    return json.loads(raw, object_pairs_hook=unique_object, parse_constant=_reject_constant)
 
 
 @lru_cache(maxsize=4096)

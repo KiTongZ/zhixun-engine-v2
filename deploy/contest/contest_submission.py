@@ -22,6 +22,7 @@ import math
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -120,6 +121,7 @@ def write_prediction_artifact(directory, model, config):
 
 
 def train(rnd) -> None:
+    start = time.perf_counter()
     contract = rnd.task if isinstance(rnd.task, dict) else {}
     task = str(contract.get("task") or "")
     if task not in TASKS:
@@ -168,6 +170,7 @@ def train(rnd) -> None:
         log("no parent checkpoint: initialised from the official baseline constructor")
 
     before = _metrics(model, validation)
+    prepared = time.perf_counter()
 
     # ---- one real platform model call decides the continuation budget
     default_lr = float(config["learning_rate"])
@@ -200,8 +203,19 @@ def train(rnd) -> None:
               f'Rate range [{default_lr * .5:g},{default_lr * 2:g}]. '
               + json.dumps(state_payload, ensure_ascii=False, separators=(",", ":")))
     limit = min(64, rnd.max_output_tokens)
+    gateway_start = time.perf_counter()
     receipt = rnd.model([{"role": "user", "content": prompt}],
                         max_tokens=limit, temperature=0, enable_thinking=False)
+    gateway_end = time.perf_counter()
+    timings = {"prepare_s": round(prepared - start, 6), "gateway_s": round(gateway_end - gateway_start, 6)}
+    usage_fields = {"requested_max_tokens": limit}
+    response = getattr(receipt, "response", None)
+    usage = response.get("usage") if isinstance(response, dict) else None
+    if isinstance(usage, dict):
+        for name in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            value = usage.get(name)
+            if type(value) is int and value >= 0:
+                usage_fields[name] = value
     decision = _extract_json(receipt.text) or {}
     log(f"model call id={receipt.call_id} decision={decision}")
 
@@ -223,6 +237,12 @@ def train(rnd) -> None:
         epochs, lr = 1, .5 * default_lr
     model.meta["learning_rate"] = lr
     model.validate()
+    damping_threshold = None
+    if dataset_key == "A" and task == "classification" and metric == "macro_f1" and direction == "higher":
+        damping_threshold = 0.0
+    elif dataset_key == "C" and task == "regression" and metric == "rmse" and direction == "lower":
+        damping_threshold = .01
+    parent_params = {name: value.copy() for name, value in model.params.items()} if damping_threshold is not None else None
 
     # ---- continue training epoch by epoch, keep the best validation state
     best_model = None
@@ -255,7 +275,25 @@ def train(rnd) -> None:
             selected_metrics = refined_metrics
             head_refined = True
 
+    damped = False
+    parent_score = _primary(before, metric)
+    if damping_threshold is not None:
+        margin = damping_threshold * abs(parent_score)
+        boundary = parent_score + margin if direction == "lower" else parent_score - margin
+        if _is_better(direction, boundary, best_score):
+            half_step = copy.deepcopy(model)
+            for name, weight in half_step.params.items():
+                anchor = parent_params[name]
+                weight[:] = anchor + .5 * (weight - anchor)
+            half_metrics = _metrics(half_step, validation)
+            half_score = _primary(half_metrics, metric)
+            if _is_better(direction, half_score, best_score):
+                model, selected_metrics, best_score = half_step, half_metrics, half_score
+                damped = True
+
     # ---- candidate artifact (checkpoint.npz written by the baseline's own saver)
+    timings["train_and_select_s"] = round(time.perf_counter() - gateway_end, 6)
+    package_start = time.perf_counter()
     work = WORK
     work.mkdir(parents=True, exist_ok=True)
     candidate_dir = work / f"candidate-r{rnd.round_index}"
@@ -264,6 +302,7 @@ def train(rnd) -> None:
         shutil.rmtree(candidate_dir)
     candidate_dir.mkdir(parents=True)
     write_prediction_artifact(candidate_dir, model, config)
+    timings["package_s"] = round(time.perf_counter() - package_start, 6)
 
     history_ids = [item["id"] for item in rnd.history()]
     hypothesis = str(decision.get("hypothesis") or f"round {rnd.round_index} continuation")[:900]
@@ -275,13 +314,18 @@ def train(rnd) -> None:
     if head_refined:
         change = f"{change[:780]} | Refitted final linear head on public training rows (ridge=0.001)."
         reason = f"Final head improved public validation {metric} to {best_score:.6f}."
+    if damped:
+        change = f"{change[:780]} | Used half of the trained parameter update."
+        reason = f"Full update regressed against the parent; half update improved the candidate to {metric}={best_score:.6f}."
+    submit_start = time.perf_counter()
     submitted = rnd.submit_candidate(
         candidate_dir,
         hypothesis=hypothesis,
         change_summary=change,
         configuration={"round": rnd.round_index, "dataset_key": dataset_key, "task": task,
                        "epochs": epochs, "learning_rate": lr, "metric": metric,
-                       "head_refined": head_refined, "validation_before": before, "validation_after": selected_metrics,
+                       "head_refined": head_refined, "damped": damped,
+                       "validation_before": before, "validation_after": selected_metrics,
                        "model_call_id": receipt.call_id, "parent": parent_info,
                        "history": history},
         seed=int(model.meta["seed"]),
@@ -289,6 +333,7 @@ def train(rnd) -> None:
         code_paths=PREDICTION_FILES,
         predict_argv=PREDICT_ARGV,
     )
+    timings["submit_s"] = round(time.perf_counter() - submit_start, 6)
 
     selected_id = submitted["artifact_id"]
     selected_kind = "candidate"
@@ -302,13 +347,17 @@ def train(rnd) -> None:
         "round": rnd.round_index, "dataset_key": dataset_key, "task": task,
         "selected": selected_kind, "artifact_id": selected_id, "candidate_id": submitted["artifact_id"],
         "model_call_id": receipt.call_id, "epochs": epochs, "learning_rate": lr,
-        "head_refined": head_refined, "validation_before": before, "validation_after": selected_metrics,
+        "head_refined": head_refined, "damped": damped,
+        "validation_before": before, "validation_after": selected_metrics,
         "history": history,
         "selected_epoch": selected_epoch, "selected_metrics": selected_metrics,
         "parent": parent_info,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
+    state_start = time.perf_counter()
     rnd.save_state(state_dir)
+    timings["save_state_s"] = round(time.perf_counter() - state_start, 6)
 
+    log("resource_usage=" + json.dumps({"seconds": timings, "model_tokens": usage_fields}, separators=(",", ":")))
     rnd.finish(
         selected_artifact_id=selected_id,
         hypothesis=hypothesis,
@@ -316,6 +365,8 @@ def train(rnd) -> None:
         reason=reason,
         configuration={"round": rnd.round_index, "selected": selected_kind, "selected_metrics": selected_metrics, "epochs": epochs, "learning_rate": lr,
                        "validation_after": selected_metrics,
+                       "damped": damped,
+                       "resource_usage": {"seconds": timings, "model_tokens": usage_fields},
                        "model_call_id": receipt.call_id},
         seed=int(model.meta["seed"]),
         history_ids=history_ids,

@@ -12,10 +12,10 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from baselines import data
 from baselines.model import Model
 
-def main(folder):
+def main(folder, revision):
     repo=Path(__file__).resolve().parents[3]
     prior=types.ModuleType("prior_data")
-    code=subprocess.check_output(["git","show","6ea97e2:deploy/contest/baselines/data.py"],cwd=repo)
+    code=subprocess.check_output(["git","show",f"{revision}:deploy/contest/baselines/data.py"],cwd=repo)
     exec(compile(code,"prior_data.py","exec"),prior.__dict__)
     invalid=[{"true_RUL":1},{"x":True},{"x":float("inf")},{"x":None},[]]
     for value in invalid:
@@ -23,8 +23,13 @@ def main(folder):
             try: loader.flatten(value)
             except ValueError: continue
             raise AssertionError(value)
+    for raw in ('{"x":1,"x":2}', '{"x":{"y":1,"y":2}}', '[NaN]', '[Infinity]', '[0] []'):
+        for loader in (prior,data):
+            try: loader.json_value(raw)
+            except ValueError: continue
+            raise AssertionError(raw)
     run=swanlab.init(workspace="KiTongZ",project="zhixun-engine-v2",mode="online",on_online_error="raise",
-                     experiment_name="ABC-feature-path-cache-parity",config={"baseline":"6ea97e2","repeats":3,"scope":"JSONL loader CPU time"})
+                     experiment_name="ABC-feature-path-cache-parity",config={"baseline":revision,"repeats":3,"scope":"JSONL loader CPU time"})
     for key in "ABC":
         pack=next(folder.glob("cpu-"+key.lower()+"-*"))
         model=Model.load(pack/"checkpoint.npz")
@@ -48,4 +53,6 @@ def main(folder):
 if __name__=="__main__":
     parser=argparse.ArgumentParser()
     parser.add_argument("packages",type=Path)
-    main(parser.parse_args().packages)
+    parser.add_argument("--revision",default="6ea97e2")
+    args=parser.parse_args()
+    main(args.packages,args.revision)

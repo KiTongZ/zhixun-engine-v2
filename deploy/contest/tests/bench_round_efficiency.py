@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import swanlab
 
 CONTEST = Path(__file__).resolve().parents[1]
-BASELINE = "ba319e8"
+BASELINE = "a8a19d1"
 sys.path.insert(0, str(CONTEST))
 import contest_submission as current
 
@@ -126,7 +126,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("packages", type=Path)
     parser.add_argument("--baseline", default=BASELINE)
-    parser.add_argument("--changed", default="AC", help="Datasets whose policy changed")
+    parser.add_argument("--changed", default="B", help="Datasets whose policy changed")
     args = parser.parse_args()
     with swanlab.init(workspace="KiTongZ", project="zhixun-engine-v2", mode="online", on_online_error="raise",
                       experiment_name="feature-cache-efficient-abc-paired-replay",

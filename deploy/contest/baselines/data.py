@@ -83,15 +83,30 @@ def flatten(inputs):
     return paths, values
 
 
+def _hashed_lines(path, digest):
+    total = 0
+    with path.open("rb") as source:
+        while block := source.read(min(1024 * 1024, MAX_BYTES + 1 - total)):
+            # Decode through the next LF so a UTF-8 character or JSON row
+            # cannot be split by an arbitrary read boundary.
+            if not block.endswith(b"\n") and total + len(block) <= MAX_BYTES:
+                block += source.readline(MAX_BYTES + 1 - total - len(block))
+            total += len(block)
+            if total > MAX_BYTES:
+                raise ValueError("dataset must be a regular JSONL file no larger than 128 MiB")
+            digest.update(block)
+            yield from block.decode("utf-8").splitlines()
+
+
 def read_dataset(path, task, classes=None, expected_paths=None):
     path = Path(path)
     if not path.is_file() or path.is_symlink() or path.stat().st_size > MAX_BYTES:
         raise ValueError("dataset must be a regular JSONL file no larger than 128 MiB")
-    raw = path.read_bytes()
     ids, features, targets = [], [], []
     seen = set()
     paths = expected_paths
-    for number, line in enumerate(raw.decode("utf-8").splitlines(), 1):
+    digest = hashlib.sha256()
+    for number, line in enumerate(_hashed_lines(path, digest), 1):
         if not line.strip():
             continue
         row = json_value(line)
@@ -121,4 +136,4 @@ def read_dataset(path, task, classes=None, expected_paths=None):
         raise ValueError("dataset is empty")
     return {"ids": ids, "x": np.asarray(features, dtype=np.float64),
             "y": np.asarray(targets, dtype=np.int64 if task == "classification" else np.float64),
-            "paths": paths, "sha256": sha256(raw)}
+            "paths": paths, "sha256": "sha256:" + digest.hexdigest()}

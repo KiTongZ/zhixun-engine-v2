@@ -178,3 +178,21 @@ C 第 10 轮记录确认平台执行了输出层修正（岭惩罚 0.001）。�
 
 [SwanLab 半步实验](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/kh1puxfe) · [C 触发阈值对照](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/9qrbyp5g) · [数据一致性和计时](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/w00c0wdc) · [实际入口十轮对照](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/plz6bxl6)
 最终归档为 zhixun-contest-feature-cache-stable.tar，已重新加载并通过 A、B、C 容器内首轮训练，以及九次断网、只读的独立预测检查。60 轮成对回放中 B 的十个检查点逐字节一致。C 在相同预算下的完整十轮本地 CPU 时间为 32.188 → 31.078 秒，该计时不包含真实平台等待。
+
+## 轴承分轮预算与分块读取候选
+
+本版从 `feature-cache-stable`（a8a19d1）继续。归档为 `zhixun-contest-feature-cache-taper.tar`。B 第 2 至 7 轮抽取公开训练样本的 1/64，第 8 至 10 轮恢复 1/32。以官方公开数据的 7,032 条训练样本为例，后九轮训练行次从 1,980 降至 1,320。按 128 的批量大小，后九轮的梯度更新从 18 次降到 12 次。能识别设备时按设备等权抽样，匿名编号时均匀抽样。
+
+| B 本地场景 | 十轮平均 RMSE | 最差轮 RMSE | 末轮 RMSE |
+| --- | ---: | ---: | ---: |
+| 九个整轴承留出折 | 656.21 → 656.30 | 677.84 → 670.99 | 651.06 → 651.30 |
+| 全公开验证集，三个种子 | 639.36 → 634.32 | 653.02 → 651.44 | 638.49 → 640.27 |
+| 匿名训练编号，三个种子 | 662.29 → 657.31 | 672.29 → 667.23 | 666.75 → 659.10 |
+| 实际训练入口，固定种子 42 | 638.00 → 638.89 | 649.22 → 654.97 | 624.40 → 621.47 |
+
+单位为分钟，越低越好。整轴承留出实验在预训练和续训中均排除了该轴承。加权输出层和目标分层抽样的收益未能在对照中稳定复现。正式评测得分与资源计量由平台确认。
+
+加载器按约 1 MiB 分批读取并计算原始文件 SHA-256，避免同时持有整份原始字节、解码文本和拆分后的行。A、C 的十轮成对回放各有十个逐字节相同的检查点。归档重载后，三项任务均完成 Docker 内的首轮训练和九次断网、只读批量预测检查。
+
+[SwanLab 分轮预算](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/l6pijpsl) · [真实训练入口十轮对照](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/4njeymj1) · [输出层实验](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/v01k0ps9) · [分层抽样实验](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/y1aezixg)
+在独立 Windows 进程各三次加载 C 公开训练文件，峰值工作集的中位数从 250.81 MiB 降至 192.45 MiB（约 23%）。C 的十轮成对回放 CPU 时间为 31.09 → 31.59 秒。公开数据的样本顺序、特征、标签、SHA-256 和检查点预测均通过一致性复核，另验证了 UTF-8 跨块和混合换行。[读取对照](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/crzfih8d)

@@ -3,6 +3,7 @@ import argparse
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
 import types
 from pathlib import Path
@@ -28,6 +29,19 @@ def main(folder, revision):
             try: loader.json_value(raw)
             except ValueError: continue
             raise AssertionError(raw)
+    with tempfile.TemporaryDirectory() as temporary:
+        path = Path(temporary) / "chunk-boundary.jsonl"
+        # Cut the first multibyte ID exactly in the middle of a UTF-8 sequence.
+        prefix = b'{"id":"'
+        padding = b" " * (1024 * 1024 - len(prefix) - 1)
+        row = '气","inputs":{"x":2},"answer":3}\r\n'.encode()
+        path.write_bytes(padding + prefix + row + b'\r{"id":"end","inputs":{"x":5},"answer":7}')
+        before = prior.read_dataset(path, "regression")
+        after = data.read_dataset(path, "regression")
+        for key in ("ids", "paths", "sha256"):
+            assert before[key] == after[key]
+        for key in ("x", "y"):
+            np.testing.assert_array_equal(before[key], after[key])
     run=swanlab.init(workspace="KiTongZ",project="zhixun-engine-v2",mode="online",on_online_error="raise",
                      experiment_name="ABC-feature-path-cache-parity",config={"baseline":revision,"repeats":3,"scope":"JSONL loader CPU time"})
     for key in "ABC":

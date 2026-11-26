@@ -182,6 +182,9 @@ def train(rnd) -> None:
         rec_epochs, factor = tested_budget
         rec_lr = default_lr * factor
     low_cost_bearing = dataset_key == "B" and task == "regression" and rnd.round_index >= 2
+    bearing_divisor = 1
+    if low_cost_bearing:
+        bearing_divisor = 64 if rnd.round_index <= 7 else 32
     late_engine = dataset_key == "C" and task == "regression" and 6 <= rnd.round_index <= 10
     if late_engine:
         rec_lr = 2 * default_lr
@@ -197,7 +200,7 @@ def train(rnd) -> None:
         "recommended": {"e": rec_epochs, "l": rec_lr},
     }
     if low_cost_bearing:
-        state_payload["sampling_fraction"] = 1 / 32
+        state_payload["sampling_fraction"] = 1 / bearing_divisor
     prompt = ('Choose a continuation budget from this state. Use recommended unless evidence favors a change. '
               'Return only JSON {"e":epochs,"l":learning_rate}. Epochs 1–3. '
               f'Rate range [{default_lr * .5:g},{default_lr * 2:g}]. '
@@ -252,7 +255,7 @@ def train(rnd) -> None:
         rows = slice(None)
         if dataset_key == "B" and task == "regression":
             rows = balanced_rows(train["ids"], model.meta["epochs"], model.meta["seed"], 1,
-                                 divisor=32 if low_cost_bearing else 1)
+                                 divisor=bearing_divisor)
         loss = float(model.fit(train["x"][rows], train["y"][rows], 1)[0])
         current = _metrics(model, validation)
         score = _primary(current, metric)
@@ -310,7 +313,8 @@ def train(rnd) -> None:
     reason = str(decision.get("reason") or f"validation {metric}={best_score:.5f} after {epochs} epoch(s)")[:900]
 
     if low_cost_bearing:
-        change = f"One 1/32-size training pass at lr={lr}; {len(rows)} draws (uniform if device groups unavailable)."
+        change = (f"One 1/{bearing_divisor}-size training pass at lr={lr}; "
+                  f"{len(rows)} draws (uniform if device groups unavailable).")
     if head_refined:
         change = f"{change[:780]} | Refitted final linear head on public training rows (ridge=0.001)."
         reason = f"Final head improved public validation {metric} to {best_score:.6f}."

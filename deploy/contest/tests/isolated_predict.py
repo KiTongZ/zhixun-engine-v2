@@ -9,15 +9,20 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from contest_submission import Model, PREDICT_ARGV, PREDICTION_FILES
+from artifact_predict import load_artifact
+from contest_submission import PREDICT_ARGV, PREDICTION_FILES
 from baselines.data import flatten
 
 
 def check(package, key, runtime, artifact):
     artifact = artifact.resolve()
-    model = Model.load(artifact / "checkpoint.npz")
+    model = load_artifact(artifact)
     task = model.meta["task"]
-    assert sorted(str(p.relative_to(artifact).as_posix()) for p in artifact.rglob("*") if p.is_file()) == sorted(["checkpoint.npz", *PREDICTION_FILES])
+    files = ["checkpoint.npz", *PREDICTION_FILES]
+    config = json.loads((artifact / "config.json").read_text(encoding="utf-8"))
+    if "engine_calibration" in config:
+        files.append("engine_calibration.py")
+    assert sorted(str(p.relative_to(artifact).as_posix()) for p in artifact.rglob("*") if p.is_file()) == sorted(files)
     with (package / "public/validation.jsonl").open(encoding="utf-8") as f:
         samples = [{"task":task, "inputs":json.loads(next(f))["inputs"]} for _ in range(5)]
     ordered = [samples[i] for i in (4, 1, 0, 2, 1)]

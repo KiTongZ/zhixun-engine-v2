@@ -18,6 +18,9 @@ def load_artifact(location):
     config = json.loads((checkpoint.parent / "config.json").read_text(encoding="utf-8"))
     if config["task"] != model.meta["task"] or config["classes"] != model.meta["classes"]:
         raise ValueError("artifact configuration does not match checkpoint")
+    if "engine_calibration" in config:
+        from engine_calibration import CalibratedModel
+        return CalibratedModel(model, config["engine_calibration"])
     return model
 
 

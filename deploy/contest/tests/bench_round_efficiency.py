@@ -86,6 +86,7 @@ def replay(entry, package, dataset, work, round_index, checkpoint, run, label):
     run.log({f"{dataset}/{label}/{k}": v for k, v in {
         "round": round_index, "cpu_s": recorded["cpu_s"], "output_cap": recorded["output_cap"],
         "prompt_chars": recorded["prompt_chars"], **config["selected_metrics"],
+        **({"condition_calibrated": int(config["condition_calibrated"])} if "condition_calibrated" in config else {}),
     }.items()})
     return work / f"candidate-r{round_index}" / "checkpoint.npz", recorded
 

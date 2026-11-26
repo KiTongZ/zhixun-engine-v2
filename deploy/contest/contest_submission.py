@@ -29,7 +29,8 @@ import numpy as np
 
 from engine_head import refine_head
 from bearing_sampling import balanced_rows
-from artifact_predict import predict_batch
+from artifact_predict import load_artifact, predict_batch
+from engine_calibration import CalibratedModel, ENGINE_PATHS, fit_calibration, validation_allows_calibration
 from baselines.data import read_dataset
 from baselines.model import Model
 
@@ -118,6 +119,8 @@ def write_prediction_artifact(directory, model, config):
     (directory / "baselines").mkdir()
     for name in PREDICTION_FILES[2:]:
         shutil.copyfile(source / name, directory / name)
+    if "engine_calibration" in config:
+        shutil.copyfile(source / "engine_calibration.py", directory / "engine_calibration.py")
 
 
 def train(rnd) -> None:
@@ -294,6 +297,18 @@ def train(rnd) -> None:
                 model, selected_metrics, best_score = half_step, half_metrics, half_score
                 damped = True
 
+    calibration_note = {}
+    if dataset_key == "C" and task == "regression" and metric == "rmse" and direction == "lower" and model.meta["paths"] == ENGINE_PATHS:
+        calibration_note = {"condition_calibrated": False}
+        correction = fit_calibration(model, train)
+        if correction is not None:
+            corrected = CalibratedModel(model, correction)
+            if validation_allows_calibration(model, corrected, validation):
+                calibration_note = {"condition_calibrated": True, "base_candidate_metrics": selected_metrics}
+                selected_metrics = _metrics(corrected, validation)
+                best_score = _primary(selected_metrics, metric)
+                config["engine_calibration"] = correction
+
     # ---- candidate artifact (checkpoint.npz written by the baseline's own saver)
     timings["train_and_select_s"] = round(time.perf_counter() - gateway_end, 6)
     package_start = time.perf_counter()
@@ -321,6 +336,9 @@ def train(rnd) -> None:
     if damped:
         change = f"{change[:780]} | Used half of the trained parameter update."
         reason = f"Full update regressed against the parent; half update improved the candidate to {metric}={best_score:.6f}."
+    if calibration_note.get("condition_calibrated"):
+        change = f"{change[:760]} | Applied an operating-condition residual fitted on public training rows."
+        reason = f"Calibration improved public RMSE to {best_score:.6f} and passed the lifetime-band checks."
     submit_start = time.perf_counter()
     submitted = rnd.submit_candidate(
         candidate_dir,
@@ -331,10 +349,10 @@ def train(rnd) -> None:
                        "head_refined": head_refined, "damped": damped,
                        "validation_before": before, "validation_after": selected_metrics,
                        "model_call_id": receipt.call_id, "parent": parent_info,
-                       "history": history},
+                       "history": history, **calibration_note},
         seed=int(model.meta["seed"]),
         checkpoint_paths=["checkpoint.npz"],
-        code_paths=PREDICTION_FILES,
+        code_paths=[*PREDICTION_FILES, "engine_calibration.py"] if "engine_calibration" in config else PREDICTION_FILES,
         predict_argv=PREDICT_ARGV,
     )
     timings["submit_s"] = round(time.perf_counter() - submit_start, 6)
@@ -356,6 +374,7 @@ def train(rnd) -> None:
         "history": history,
         "selected_epoch": selected_epoch, "selected_metrics": selected_metrics,
         "parent": parent_info,
+        **calibration_note,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
     state_start = time.perf_counter()
     rnd.save_state(state_dir)
@@ -371,7 +390,7 @@ def train(rnd) -> None:
                        "validation_after": selected_metrics,
                        "damped": damped,
                        "resource_usage": {"seconds": timings, "model_tokens": usage_fields},
-                       "model_call_id": receipt.call_id},
+                       "model_call_id": receipt.call_id, **calibration_note},
         seed=int(model.meta["seed"]),
         history_ids=history_ids,
         model_call_ids=list(rnd.call_ids),
@@ -393,7 +412,7 @@ def _load(path: Path) -> Model:
     key = (str(path), path.stat().st_mtime if path.exists() else 0)
     model = _CACHE.get(key)
     if model is None:
-        model = Model.load(path)
+        model = load_artifact(path) if path.with_name("config.json").is_file() else Model.load(path)
         _CACHE.clear()
         _CACHE[key] = model
     return model

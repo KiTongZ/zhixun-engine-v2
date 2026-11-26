@@ -196,3 +196,14 @@ C 第 10 轮记录确认平台执行了输出层修正（岭惩罚 0.001）。�
 
 [SwanLab 分轮预算](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/l6pijpsl) · [真实训练入口十轮对照](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/4njeymj1) · [输出层实验](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/v01k0ps9) · [分层抽样实验](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/y1aezixg)
 在独立 Windows 进程各三次加载 C 公开训练文件，峰值工作集的中位数从 250.81 MiB 降至 192.45 MiB（约 23%）。C 的十轮成对回放 CPU 时间为 31.09 → 31.59 秒。公开数据的样本顺序、特征、标签、SHA-256 和检查点预测均通过一致性复核，另验证了 UTF-8 跨块和混合换行。[读取对照](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/crzfih8d)
+
+## C 工况校正单变量对照
+
+提交归档为 `zhixun-contest-c-condition-calibrated.tar`，从已完成线上评测的 `feature-cache-taper`（26c90eb，客观成绩 12.915568 / 35）派生。A、B 保持原训练和评估策略。C 每轮沿原路线更新父检查点，在本轮最终候选的基础上，用公开训练样本拟合工况残差校正。传感器按工况单独标准化。剩余寿命至少 150 循环的训练样本在校正拟合中加倍权重。验证数据只用于决定是否接受校正。
+
+只有当公开验证集整体 RMSE 改善，且存在样本的近失效段（小于 25 循环）和长寿命段（至少 250 循环）各自的 RMSE 均未上升，才将校正系数写入候选配置。预测入口只读取当次传感器观测和产物内的校正系数。对拟合时没见过的工况，输出基础模型预测。下轮继承原模型检查点，并在当轮重新拟合校正层。
+
+在固定公开训练与验证投影的十轮成对回放中，C 的逐轮平均 RMSE 从 52.0065 降至 51.6498，最差轮由 52.3842 降至 52.3589，末轮均为 51.4160。A、B 共二十个检查点逐字节一致。三项任务均通过镜像重载、容器内首轮训练和只读模型目录中的独立批量预测检查。线上正式评测用于判断整套提交的综合收益。
+
+模型类型为基础模型，`Qwen/Qwen3.8-27B`。评测时沿用对照版本的绑定模型和其他设置。[源码分支](https://github.com/KiTongZ/zhixun-engine-v2/tree/c-condition-calibrated) · [公开数据工况校正实验](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/eycedo6d) · [训练入口十轮成对回放](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/apfchd3u)
+另将实际触发校正的第 2 轮 C 产物放入仅挂载模型目录的预测容器，验证了单条 JSONL、乱序批次、重复样本、空批和三种路径参数。陌生工况回退到基础模型，预测数值逐项一致。该轮公开 RMSE 由 52.0587 降至 51.3775，MAE 由 38.5471 升到 39.1595。[带校正产物的隔离预检](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/7cuxvrd0)

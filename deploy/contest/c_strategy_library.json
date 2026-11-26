@@ -1,0 +1,14 @@
+{
+  "operating_regimes": {
+    "advice": "Regime shifts can mask wear. Prefer the tested budget unless public validation supports a change.",
+    "source": "https://data.nasa.gov/dataset/cmapss-jet-engine-simulated-data"
+  },
+  "whole_engine": {
+    "advice": "Cycles from one engine are correlated. Treat tail errors as a reason to use short updates.",
+    "source": "https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.GroupKFold.html"
+  },
+  "short_budget": {
+    "advice": "More epochs can lower training loss while validation degrades. Prefer a short continuation.",
+    "source": "https://pubmed.ncbi.nlm.nih.gov/12662814/"
+  }
+}

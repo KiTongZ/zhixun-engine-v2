@@ -38,6 +38,7 @@ TASKS = ("classification", "regression")
 PREDICT_ARGV = ["python3", "-B", "/model/predict.py"]
 PREDICTION_FILES = ["predict.py", "config.json", "baselines/__init__.py", "baselines/data.py", "baselines/model.py"]
 CONFIG_DIR = Path(__file__).resolve().parent / "baselines" / "configs"
+C_STRATEGIES = Path(__file__).resolve().with_name("c_strategy_library.json")
 WORK = Path(os.environ.get("CONTEST_WORK", "/workspace"))
 
 
@@ -204,6 +205,18 @@ def train(rnd) -> None:
     }
     if low_cost_bearing:
         state_payload["sampling_fraction"] = 1 / bearing_divisor
+    retrieval_note = {}
+    if dataset_key == "C" and task == "regression" and model.meta["paths"] == ENGINE_PATHS:
+        regimes = np.unique(np.rint(train["x"][:, 21])).size
+        if rnd.round_index == 1 and regimes > 1:
+            key = "operating_regimes"
+        elif validation["y"].max() >= 250 and rnd.round_index <= 5:
+            key = "whole_engine"
+        else:
+            key = "short_budget"
+        card = json.loads(C_STRATEGIES.read_text(encoding="utf-8"))[key]
+        state_payload["strategy"] = card["advice"]
+        retrieval_note = {"retrieved_strategy": key, "strategy_source": card["source"]}
     prompt = ('Choose a continuation budget from this state. Use recommended unless evidence favors a change. '
               'Return only JSON {"e":epochs,"l":learning_rate}. Epochs 1–3. '
               f'Rate range [{default_lr * .5:g},{default_lr * 2:g}]. '
@@ -349,7 +362,7 @@ def train(rnd) -> None:
                        "head_refined": head_refined, "damped": damped,
                        "validation_before": before, "validation_after": selected_metrics,
                        "model_call_id": receipt.call_id, "parent": parent_info,
-                       "history": history, **calibration_note},
+                       "history": history, **calibration_note, **retrieval_note},
         seed=int(model.meta["seed"]),
         checkpoint_paths=["checkpoint.npz"],
         code_paths=[*PREDICTION_FILES, "engine_calibration.py"] if "engine_calibration" in config else PREDICTION_FILES,
@@ -375,6 +388,7 @@ def train(rnd) -> None:
         "selected_epoch": selected_epoch, "selected_metrics": selected_metrics,
         "parent": parent_info,
         **calibration_note,
+        **retrieval_note,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
     state_start = time.perf_counter()
     rnd.save_state(state_dir)
@@ -390,7 +404,7 @@ def train(rnd) -> None:
                        "validation_after": selected_metrics,
                        "damped": damped,
                        "resource_usage": {"seconds": timings, "model_tokens": usage_fields},
-                       "model_call_id": receipt.call_id, **calibration_note},
+                       "model_call_id": receipt.call_id, **calibration_note, **retrieval_note},
         seed=int(model.meta["seed"]),
         history_ids=history_ids,
         model_call_ids=list(rnd.call_ids),

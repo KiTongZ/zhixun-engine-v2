@@ -207,3 +207,12 @@ C 第 10 轮记录确认平台执行了输出层修正（岭惩罚 0.001）。�
 
 模型类型为基础模型，`Qwen/Qwen3.8-27B`。评测时沿用对照版本的绑定模型和其他设置。[源码分支](https://github.com/KiTongZ/zhixun-engine-v2/tree/c-condition-calibrated) · [公开数据工况校正实验](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/eycedo6d) · [训练入口十轮成对回放](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/apfchd3u)
 另将实际触发校正的第 2 轮 C 产物放入仅挂载模型目录的预测容器，验证了单条 JSONL、乱序批次、重复样本、空批和三种路径参数。陌生工况回退到基础模型，预测数值逐项一致。该轮公开 RMSE 由 52.0587 降至 51.3775，MAE 由 38.5471 升到 39.1595。[带校正产物的隔离预检](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/7cuxvrd0)
+
+## C 离线策略库候选
+
+`zhixun-contest-c-offline-strategies.tar` 是从 `c-condition-calibrated`（dc2e88f）派生的后续对照。镜像归档 65,144,320 字节（62.126 MiB）。策略库是随镜像分发的 JSON，含三条改写后的公开资料摘要。C 的训练入口按多工况首轮、前期长寿命误差关注、后期续训三个情形选择一条，把短建议加入同一次模型请求。回执和本轮状态同时记下策略编号和来源。外部资料以公开事实和策略摘要的形式提供给决策模型，数值拟合使用平台挂载的当轮公开训练集。
+
+本地使用模拟网关验证三个检索分支、同预算下的 A/B/C 十轮回放和候选检查点一致性。新镜像在断网容器完成 C 首轮训练，回执中的检索项为 `operating_regimes`。真实网关的预算选择和线上得分仍待验证。先用工况校正版本与 12.915568 的原版做 C 校正对照，再用本版与工况校正版对照检索增量。
+
+[NASA 工况资料](https://data.nasa.gov/dataset/cmapss-jet-engine-simulated-data) · [按整机分组验证](https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.GroupKFold.html) · [早停研究](https://pubmed.ncbi.nlm.nih.gov/12662814/) · [SwanLab 成对回放](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/nzs2iky6) · [断网容器训练](https://swanlab.cn/@KiTongZ/zhixun-engine-v2/runs/38loiqtg)
+同预算对照的 30 对检查点逐字节一致。检索让 C 每轮提示的字符数中位数从 314 增至 418，实际新增 Token 以真实网关计量为准。与工况校正版相比，归档增加 7.5 KiB。

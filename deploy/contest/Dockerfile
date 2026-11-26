@@ -27,6 +27,7 @@ COPY deploy/contest/harness.py /app/harness.py
 COPY deploy/contest/artifact_predict.py /app/artifact_predict.py
 COPY deploy/contest/engine_head.py /app/engine_head.py
 COPY deploy/contest/engine_calibration.py /app/engine_calibration.py
+COPY deploy/contest/c_strategy_library.json /app/c_strategy_library.json
 COPY deploy/contest/bearing_sampling.py /app/bearing_sampling.py
 COPY deploy/contest/contest_submission.py /app/contest_submission.py
 

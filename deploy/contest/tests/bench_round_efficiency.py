@@ -27,7 +27,7 @@ def load_revision(relative, revision):
     return module
 
 
-def replay(entry, package, dataset, work, round_index, checkpoint, run, label):
+def replay(entry, package, dataset, work, round_index, checkpoint, run, label, verify_retrieval=False):
     entry.WORK = work
     task = "classification" if dataset == "A" else "regression"
     epochs, rate = {
@@ -44,6 +44,9 @@ def replay(entry, package, dataset, work, round_index, checkpoint, run, label):
         call_ids.append("local-call")
         recorded["prompt_chars"] = len(messages[0]["content"])
         recorded["output_cap"] = options["max_tokens"]
+        if verify_retrieval:
+            state = json.loads(messages[0]["content"].split("]. ", 1)[1])
+            assert ("strategy" in state) == (label == "candidate" and dataset == "C")
         if label == "candidate":
             assert options["enable_thinking"] is False and options["max_tokens"] == 64
             # Exercise invalid, truncated and valid compact responses. Fallback
@@ -78,6 +81,10 @@ def replay(entry, package, dataset, work, round_index, checkpoint, run, label):
     assert recorded["model_call_ids"] == call_ids == ["local-call"]
     config = recorded["configuration"]
     assert (config["epochs"], config["learning_rate"]) == (epochs, rate)
+    if verify_retrieval and label == "candidate" and dataset == "C":
+        strategy = "operating_regimes" if round_index == 1 else "whole_engine" if round_index <= 5 else "short_budget"
+        assert config["retrieved_strategy"] == strategy
+        assert config["strategy_source"].startswith("https://")
     if "resource_usage" in config:
         usage = config["resource_usage"]
         assert usage["model_tokens"]["total_tokens"] == 21
@@ -91,7 +98,7 @@ def replay(entry, package, dataset, work, round_index, checkpoint, run, label):
     return work / f"candidate-r{round_index}" / "checkpoint.npz", recorded
 
 
-def compare(packages, work, run, baseline, changed):
+def compare(packages, work, run, baseline, changed, verify_retrieval=False):
     prior = load_revision("contest_submission.py", baseline)
     prior.Model = load_revision("baselines/model.py", baseline).Model
     prior.read_dataset = load_revision("baselines/data.py", baseline).read_dataset
@@ -108,7 +115,7 @@ def compare(packages, work, run, baseline, changed):
             for label in order:
                 entry = prior if label == "baseline" else current
                 checkpoints[label], rec = replay(entry, package, dataset, work / dataset / label,
-                                                 round_index, checkpoints[label], run, label)
+                                                 round_index, checkpoints[label], run, label, verify_retrieval)
                 records[label] = rec["configuration"]["selected_metrics"]
                 scores[label].append(records[label][metric])
                 cpu[label].append(rec["cpu_s"])
@@ -128,10 +135,11 @@ if __name__ == "__main__":
     parser.add_argument("packages", type=Path)
     parser.add_argument("--baseline", default=BASELINE)
     parser.add_argument("--changed", default="B", help="Datasets whose policy changed")
+    parser.add_argument("--verify-retrieval", action="store_true")
     args = parser.parse_args()
     with swanlab.init(workspace="KiTongZ", project="zhixun-engine-v2", mode="online", on_online_error="raise",
                       experiment_name="feature-cache-efficient-abc-paired-replay",
                       config={"baseline": args.baseline, "changed": args.changed, "rounds": 10,
                               "model_gateway": "local stub", "usage": "synthetic test fixture"}) as run:
         with tempfile.TemporaryDirectory() as folder:
-            compare(args.packages, Path(folder), run, args.baseline, args.changed)
+            compare(args.packages, Path(folder), run, args.baseline, args.changed, args.verify_retrieval)
